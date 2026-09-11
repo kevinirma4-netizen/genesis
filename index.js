@@ -19,7 +19,7 @@ const {
 } = require('discord.js');
 
 /* =========================================================
-   AUREON TRYOUT BOT • FULL FIXED VERSION
+   CLIENT
 ========================================================= */
 
 const client = new Client({
@@ -40,123 +40,47 @@ const GOLD = 0xD9B45C;
 const GREEN = 0x5BC47B;
 const RED = 0xB84949;
 
-/* =========================================================
-   BANNER
-========================================================= */
-
-const DEFAULT_BANNER_URL =
-    'https://cdn.discordapp.com/attachments/1546557355313856603/1548019473561423963/bannrerrer.jpg?ex=6aa588fb&is=6aa4377b&hm=762cdee4242861c771a2b3750408fc0ba7b098d33fbefea17760cda296ea23d4';
-
-/*
- * Railway BANNER_URL can override the default.
- * If BANNER_URL is missing, the default banner above is used.
- */
-
-const BANNER_URL =
-    process.env.BANNER_URL?.trim() ||
-    DEFAULT_BANNER_URL;
-
-/* =========================================================
-   TOKEN
-========================================================= */
-
-const rawToken =
-    process.env.TOKEN ??
-    process.env.DISCORD_TOKEN ??
-    '';
-
-const TOKEN =
-    typeof rawToken === 'string'
-        ? rawToken
-            .trim()
-            .replace(/^["']|["']$/g, '')
-            .replace(/^Bot\s+/i, '')
-            .trim()
-        : '';
-
-if (!TOKEN) {
-    console.error('');
-    console.error('======================================');
-    console.error('❌ DISCORD BOT TOKEN IS MISSING');
-    console.error('======================================');
-    console.error('');
-    console.error('Railway Variable required:');
-    console.error('TOKEN = your Discord bot token');
-    console.error('');
-    process.exit(1);
-}
-
-/* =========================================================
-   ROLE CONFIG
-========================================================= */
-
 const TRYOUT_HOSTER_ROLE_ID =
-    process.env.TRYOUT_HOSTER_ROLE_ID?.trim() ||
-    '';
+    process.env.TRYOUT_HOSTER_ROLE_ID;
 
 const TRYOUT_PING_ROLE_ID =
-    process.env.TRYOUT_PING_ROLE_ID?.trim() ||
-    '';
+    process.env.TRYOUT_PING_ROLE_ID;
+
+const BANNER_URL =
+    process.env.BANNER_URL || '';
 
 const RANK_ROLE_IDS = {
-    F:
-        process.env.AURE_RANK_F_ROLE_ID?.trim() ||
-        '',
-
-    C:
-        process.env.AURE_RANK_C_ROLE_ID?.trim() ||
-        '',
-
-    B:
-        process.env.AURE_RANK_B_ROLE_ID?.trim() ||
-        '',
-
-    A:
-        process.env.AURE_RANK_A_ROLE_ID?.trim() ||
-        '',
-
-    S:
-        process.env.AURE_RANK_S_ROLE_ID?.trim() ||
-        ''
+    F: process.env.AURE_RANK_F_ROLE_ID,
+    C: process.env.AURE_RANK_C_ROLE_ID,
+    B: process.env.AURE_RANK_B_ROLE_ID,
+    A: process.env.AURE_RANK_A_ROLE_ID,
+    S: process.env.AURE_RANK_S_ROLE_ID
 };
 
 /* =========================================================
    MEMORY
 ========================================================= */
 
-const tryouts =
-    new Map();
-
-const drafts =
-    new Map();
-
-const announcements =
-    new Map();
-
-const pendingAnnouncements =
-    new Map();
+const tryouts = new Map();
+const drafts = new Map();
+const announcements = new Map();
+const pendingAnnouncements = new Map();
 
 /* =========================================================
    RESULTS DATABASE
 ========================================================= */
 
-const dataFolder =
-    path.join(
-        __dirname,
-        'data'
-    );
+const dataFolder = path.join(
+    __dirname,
+    'data'
+);
 
-const resultsPath =
-    path.join(
-        dataFolder,
-        'player-results.json'
-    );
+const resultsPath = path.join(
+    dataFolder,
+    'player-results.json'
+);
 
-if (
-    !fs.existsSync(
-        dataFolder
-    )
-) {
+if (!fs.existsSync(dataFolder)) {
     fs.mkdirSync(
         dataFolder,
         {
@@ -165,25 +89,13 @@ if (
     );
 }
 
-if (
-    !fs.existsSync(
-        resultsPath
-    )
-) {
+if (!fs.existsSync(resultsPath)) {
     fs.writeFileSync(
         resultsPath,
-        JSON.stringify(
-            {},
-            null,
-            2
-        ),
+        JSON.stringify({}, null, 2),
         'utf8'
     );
 }
-
-/* =========================================================
-   LOAD RESULTS
-========================================================= */
 
 function loadResults() {
     try {
@@ -207,82 +119,10 @@ let resultsDatabase =
     loadResults();
 
 /* =========================================================
-   SAVE RESULTS
+   RESULT HISTORY / MIGRATION
 ========================================================= */
 
-function saveResults() {
-    try {
-        fs.writeFileSync(
-            resultsPath,
-            JSON.stringify(
-                resultsDatabase,
-                null,
-                2
-            ),
-            'utf8'
-        );
-    } catch (error) {
-        console.error(
-            '❌ Could not save player results:',
-            error
-        );
-    }
-}
-
-/* =========================================================
-   RANK
-========================================================= */
-
-function getRank(
-    overall
-) {
-    if (overall >= 80) {
-        return 'S';
-    }
-
-    if (overall >= 65) {
-        return 'A';
-    }
-
-    if (overall >= 50) {
-        return 'B';
-    }
-
-    if (overall >= 30) {
-        return 'C';
-    }
-
-    return 'F';
-}
-
-function getRankText(
-    rank
-) {
-    return {
-        S:
-            'S • ELITE',
-
-        A:
-            'A • ADVANCED',
-
-        B:
-            'B • STRONG',
-
-        C:
-            'C • DEVELOPING',
-
-        F:
-            'F • BEGINNER'
-    }[rank] || rank;
-}
-
-/* =========================================================
-   PLAYER DATA
-========================================================= */
-
-function normalizePlayerData(
-    data
-) {
+function normalizePlayerData(data) {
     if (
         !data ||
         typeof data !== 'object'
@@ -292,57 +132,47 @@ function normalizePlayerData(
 
     const legacyResult = {
         shooting:
-            Number(
-                data.shooting
-            ) || 0,
+            Number(data.shooting) || 0,
 
         passing:
-            Number(
-                data.passing
-            ) || 0,
+            Number(data.passing) || 0,
 
         teamwork:
-            Number(
-                data.teamwork
-            ) || 0,
+            Number(data.teamwork) || 0,
 
         gk:
-            Number(
-                data.gk
-            ) || 0,
+            Number(data.gk) || 0,
 
         overall:
-            Number(
-                data.overall
-            ) || 0,
+            Number(data.overall) || 0,
 
         rank:
             data.rank ||
             getRank(
-                Number(
-                    data.overall
-                ) || 0
+                Number(data.overall) || 0
             ),
 
         thingsToFix:
-            data.thingsToFix ||
-            '',
+            data.thingsToFix || '',
 
         completedAt:
             data.updatedAt ||
             new Date().toISOString()
     };
 
-    let history =
-        Array.isArray(
-            data.history
-        )
+    const history =
+        Array.isArray(data.history)
             ? data.history.filter(
                 entry =>
                     entry &&
                     typeof entry === 'object'
             )
             : [];
+
+    /*
+     * Old database entries only had one result.
+     * Convert that result into history automatically.
+     */
 
     if (
         history.length === 0 &&
@@ -359,7 +189,7 @@ function normalizePlayerData(
         );
     }
 
-    history =
+    const cleanedHistory =
         history.map(
             entry => ({
                 shooting:
@@ -407,16 +237,16 @@ function normalizePlayerData(
         );
 
     const latest =
-        history.length > 0
-            ? history[
-                history.length - 1
+        cleanedHistory.length > 0
+            ? cleanedHistory[
+                cleanedHistory.length - 1
             ]
             : legacyResult;
 
     const bestOVR =
-        history.length > 0
+        cleanedHistory.length > 0
             ? Math.max(
-                ...history.map(
+                ...cleanedHistory.map(
                     entry =>
                         Number(
                             entry.overall
@@ -447,26 +277,46 @@ function normalizePlayerData(
             latest.rank,
 
         thingsToFix:
-            latest.thingsToFix ||
-            '',
+            latest.thingsToFix || '',
 
         updatedAt:
             data.updatedAt ||
             latest.completedAt ||
             new Date().toISOString(),
 
-        history,
+        history:
+            cleanedHistory,
+
+        /*
+         * This is ONLY based on completed
+         * result entries.
+         */
 
         tryoutsCompleted:
-            history.length,
+            cleanedHistory.length,
 
         bestOVR
     };
 }
 
-/* =========================================================
-   NORMALIZE DATABASE
-========================================================= */
+function saveResults() {
+    try {
+        fs.writeFileSync(
+            resultsPath,
+            JSON.stringify(
+                resultsDatabase,
+                null,
+                2
+            ),
+            'utf8'
+        );
+    } catch (error) {
+        console.error(
+            '❌ Could not save player results:',
+            error
+        );
+    }
+}
 
 function normalizeDatabase() {
     let changed = false;
@@ -508,17 +358,11 @@ function normalizeDatabase() {
     }
 }
 
-/* =========================================================
-   GET PLAYER
-========================================================= */
-
 function getStoredPlayerData(
     userId
 ) {
     const data =
-        resultsDatabase[
-            userId
-        ];
+        resultsDatabase[userId];
 
     if (!data) {
         return null;
@@ -533,9 +377,8 @@ function getStoredPlayerData(
         return null;
     }
 
-    resultsDatabase[
-        userId
-    ] = normalized;
+    resultsDatabase[userId] =
+        normalized;
 
     return normalized;
 }
@@ -544,14 +387,10 @@ function getStoredPlayerData(
    HELPERS
 ========================================================= */
 
-function isTryoutHoster(
-    member
-) {
+function isTryoutHoster(member) {
     return Boolean(
         member &&
         TRYOUT_HOSTER_ROLE_ID &&
-        member.roles &&
-        member.roles.cache &&
         member.roles.cache.has(
             TRYOUT_HOSTER_ROLE_ID
         )
@@ -574,13 +413,45 @@ function calculateOverall(
     );
 }
 
+function getRank(
+    overall
+) {
+    if (overall >= 80) {
+        return 'S';
+    }
+
+    if (overall >= 65) {
+        return 'A';
+    }
+
+    if (overall >= 50) {
+        return 'B';
+    }
+
+    if (overall >= 30) {
+        return 'C';
+    }
+
+    return 'F';
+}
+
+function getRankText(
+    rank
+) {
+    return {
+        S: 'S • ELITE',
+        A: 'A • ADVANCED',
+        B: 'B • STRONG',
+        C: 'C • DEVELOPING',
+        F: 'F • BEGINNER'
+    }[rank] || rank;
+}
+
 function getRankRoleId(
     rank
 ) {
     return (
-        RANK_ROLE_IDS[
-            rank
-        ] ||
+        RANK_ROLE_IDS[rank] ||
         null
     );
 }
@@ -589,12 +460,15 @@ function formatTime(
     unit,
     amount
 ) {
+    const singular =
+        amount === 1;
+
     if (
         unit === 'minutes'
     ) {
         return (
             `${amount} minute${
-                amount === 1
+                singular
                     ? ''
                     : 's'
             }`
@@ -603,7 +477,7 @@ function formatTime(
 
     return (
         `${amount} hour${
-            amount === 1
+            singular
                 ? ''
                 : 's'
         }`
@@ -658,9 +532,28 @@ function timeLeft(
     );
 }
 
-/* =========================================================
-   PRESENCE
-========================================================= */
+function progressBar(
+    current,
+    total = MAX_PLAYERS
+) {
+    const filled =
+        Math.min(
+            total,
+            Math.max(
+                0,
+                current
+            )
+        );
+
+    return (
+        '▰'.repeat(
+            filled
+        ) +
+        '▱'.repeat(
+            total - filled
+        )
+    );
+}
 
 function updatePresence() {
     if (!client.user) {
@@ -694,20 +587,19 @@ function updatePresence() {
             }
         ],
 
-        status:
-            'online'
+        status: 'online'
     });
 }
 
 /* =========================================================
-   TRYOUT HUB EMBED
+   TRYOUT HUB
 ========================================================= */
 
 function tryoutEmbed(
     lobby
 ) {
     const playerList =
-        lobby.players.length > 0
+        lobby.players.length
             ? lobby.players
                 .map(
                     (
@@ -771,15 +663,14 @@ function tryoutEmbed(
             .setDescription(
                 '✦ **L O B B Y** ✦\n\n' +
 
-                '👑 **Host**\n' +
-
+                `👑 **Host**\n` +
                 `<@${lobby.hostId}>\n\n` +
 
                 `✦ **Players** — ${lobby.players.length}/${MAX_PLAYERS}\n` +
 
                 `${bar}\n\n` +
 
-                '**PLAYER LIST**\n' +
+                `**PLAYER LIST**\n` +
 
                 `${playerList}\n\n` +
 
@@ -813,10 +704,6 @@ function tryoutEmbed(
     return embed;
 }
 
-/* =========================================================
-   TRYOUT BUTTONS
-========================================================= */
-
 function tryoutButtons(
     lobby
 ) {
@@ -839,7 +726,7 @@ function tryoutButtons(
                     )
                     .setDisabled(
                         lobby.players.length >=
-                        MAX_PLAYERS
+                            MAX_PLAYERS
                     ),
 
                 new ButtonBuilder()
@@ -888,7 +775,7 @@ function tryoutButtons(
 }
 
 /* =========================================================
-   RESULT EMBED
+   RESULT CARD
 ========================================================= */
 
 function resultEmbed(
@@ -1012,10 +899,6 @@ function resultEmbed(
         });
 }
 
-/* =========================================================
-   RESULT MODAL
-========================================================= */
-
 function resultModal(
     playerId,
     existing = null
@@ -1029,118 +912,142 @@ function resultModal(
                 'AUREON • PLAYER STATS'
             );
 
-    const makeInput =
-        (
-            id,
-            label,
-            style,
-            value,
-            required = true
-        ) => {
+    const shooting =
+        new TextInputBuilder()
+            .setCustomId(
+                'shooting'
+            )
+            .setLabel(
+                'Shooting (0-100)'
+            )
+            .setStyle(
+                TextInputStyle.Short
+            )
+            .setRequired(
+                true
+            )
+            .setValue(
+                existing?.shooting !== undefined
+                    ? String(
+                        existing.shooting
+                    )
+                    : ''
+            );
 
-            const builder =
-                new TextInputBuilder()
-                    .setCustomId(
-                        id
+    const passing =
+        new TextInputBuilder()
+            .setCustomId(
+                'passing'
+            )
+            .setLabel(
+                'Passing (0-100)'
+            )
+            .setStyle(
+                TextInputStyle.Short
+            )
+            .setRequired(
+                true
+            )
+            .setValue(
+                existing?.passing !== undefined
+                    ? String(
+                        existing.passing
                     )
-                    .setLabel(
-                        label
-                    )
-                    .setStyle(
-                        style
-                    )
-                    .setRequired(
-                        required
-                    )
-                    .setMaxLength(
-                        id ===
-                            'thingsToFix'
-                            ? 1000
-                            : 3
-                    )
-                    .setValue(
-                        value
-                    );
+                    : ''
+            );
 
-            return builder;
-        };
+    const teamwork =
+        new TextInputBuilder()
+            .setCustomId(
+                'teamwork'
+            )
+            .setLabel(
+                'Teamwork (0-100)'
+            )
+            .setStyle(
+                TextInputStyle.Short
+            )
+            .setRequired(
+                true
+            )
+            .setValue(
+                existing?.teamwork !== undefined
+                    ? String(
+                        existing.teamwork
+                    )
+                    : ''
+            );
+
+    const gk =
+        new TextInputBuilder()
+            .setCustomId(
+                'gk'
+            )
+            .setLabel(
+                'GK (0-100)'
+            )
+            .setStyle(
+                TextInputStyle.Short
+            )
+            .setRequired(
+                true
+            )
+            .setValue(
+                existing?.gk !== undefined
+                    ? String(
+                        existing.gk
+                    )
+                    : ''
+            );
+
+    const thingsToFix =
+        new TextInputBuilder()
+            .setCustomId(
+                'thingsToFix'
+            )
+            .setLabel(
+                'Things to Fix'
+            )
+            .setStyle(
+                TextInputStyle.Paragraph
+            )
+            .setRequired(
+                false
+            )
+            .setValue(
+                existing?.thingsToFix ||
+                ''
+            );
 
     modal.addComponents(
         new ActionRowBuilder()
             .addComponents(
-                makeInput(
-                    'shooting',
-                    'Shooting (0-100)',
-                    TextInputStyle.Short,
-                    existing?.shooting !== undefined
-                        ? String(
-                            existing.shooting
-                        )
-                        : ''
-                )
+                shooting
             ),
 
         new ActionRowBuilder()
             .addComponents(
-                makeInput(
-                    'passing',
-                    'Passing (0-100)',
-                    TextInputStyle.Short,
-                    existing?.passing !== undefined
-                        ? String(
-                            existing.passing
-                        )
-                        : ''
-                )
+                passing
             ),
 
         new ActionRowBuilder()
             .addComponents(
-                makeInput(
-                    'teamwork',
-                    'Teamwork (0-100)',
-                    TextInputStyle.Short,
-                    existing?.teamwork !== undefined
-                        ? String(
-                            existing.teamwork
-                        )
-                        : ''
-                )
+                teamwork
             ),
 
         new ActionRowBuilder()
             .addComponents(
-                makeInput(
-                    'gk',
-                    'GK (0-100)',
-                    TextInputStyle.Short,
-                    existing?.gk !== undefined
-                        ? String(
-                            existing.gk
-                        )
-                        : ''
-                )
+                gk
             ),
 
         new ActionRowBuilder()
             .addComponents(
-                makeInput(
-                    'thingsToFix',
-                    'Things to Fix',
-                    TextInputStyle.Paragraph,
-                    existing?.thingsToFix ||
-                        '',
-                    false
-                )
+                thingsToFix
             )
     );
 
     return modal;
 }
-
-/* =========================================================
-   RESULT PREVIEW BUTTONS
-========================================================= */
 
 function resultPreviewButtons(
     playerId
@@ -1185,20 +1092,28 @@ function resultPreviewButtons(
 ========================================================= */
 
 function getLeaderboardEntries() {
+
     return Object.entries(
         resultsDatabase
     )
 
         .map(
-            ([
-                userId,
-                raw
-            ]) => {
+            (
+                [
+                    userId,
+                    raw
+                ]
+            ) => {
 
                 const data =
                     normalizePlayerData(
                         raw
                     );
+
+                /*
+                 * A player MUST have a completed
+                 * result to appear here.
+                 */
 
                 if (
                     !data ||
@@ -1208,9 +1123,8 @@ function getLeaderboardEntries() {
                     return null;
                 }
 
-                resultsDatabase[
-                    userId
-                ] = data;
+                resultsDatabase[userId] =
+                    data;
 
                 return {
                     userId,
@@ -1229,6 +1143,11 @@ function getLeaderboardEntries() {
                 b
             ) => {
 
+                /*
+                 * Current OVR decides the
+                 * leaderboard position.
+                 */
+
                 if (
                     b.data.overall !==
                     a.data.overall
@@ -1239,6 +1158,11 @@ function getLeaderboardEntries() {
                     );
                 }
 
+                /*
+                 * Highest historical OVR
+                 * breaks ties.
+                 */
+
                 if (
                     b.data.bestOVR !==
                     a.data.bestOVR
@@ -1248,6 +1172,11 @@ function getLeaderboardEntries() {
                         a.data.bestOVR
                     );
                 }
+
+                /*
+                 * More completed tryouts
+                 * breaks another tie.
+                 */
 
                 if (
                     b.data.tryoutsCompleted !==
@@ -1277,13 +1206,16 @@ function getLeaderboardEntries() {
         );
 }
 
-function buildLeaderboardEmbed() {
+function buildLeaderboardEmbed(
+    guild
+) {
     const entries =
         getLeaderboardEntries();
 
     if (
         entries.length === 0
     ) {
+
         return new EmbedBuilder()
 
             .setColor(
@@ -1312,61 +1244,86 @@ function buildLeaderboardEmbed() {
     let description =
         '✦ **TOP 10 PLAYERS** ✦\n\n';
 
-    const medals = [
-        '🥇',
-        '🥈',
-        '🥉'
-    ];
+    /* ---------------------------------------------------------
+       TOP 1
+       Special detailed information.
+    --------------------------------------------------------- */
 
-    entries.forEach(
-        (
-            entry,
-            index
-        ) => {
+    const top1 =
+        entries[0];
 
-            if (
-                index < 3
-            ) {
+    description +=
+        '🥇 **TOP 1**\n' +
 
-                description +=
-                    `${medals[index]} **TOP ${index + 1}**\n` +
+        `> <@${top1.userId}>\n` +
 
-                    `> <@${entry.userId}>\n` +
+        `> ◈ **${top1.data.overall} OVR**\n` +
 
-                    `> ◈ **${entry.data.overall} OVR**\n`;
+        `> TRYOUTS    **${top1.data.tryoutsCompleted}**\n` +
 
-                if (
-                    index === 0
-                ) {
+        `> BEST OVR   **${top1.data.bestOVR}**\n\n`;
 
-                    description +=
-                        `> TRYOUTS    **${entry.data.tryoutsCompleted}**\n` +
+    /* ---------------------------------------------------------
+       TOP 2
+    --------------------------------------------------------- */
 
-                        `> BEST OVR   **${entry.data.bestOVR}**\n`;
-                }
+    if (
+        entries[1]
+    ) {
 
-                description +=
-                    '\n';
+        description +=
+            '🥈 **TOP 2**\n' +
 
-            } else {
+            `> <@${entries[1].userId}>\n` +
 
-                if (
-                    index === 3
-                ) {
-                    description +=
-                        '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
-                }
+            `> ◈ **${entries[1].data.overall} OVR**\n\n`;
+    }
 
-                description +=
-                    `**${String(
-                        index + 1
-                    ).padStart(
-                        2,
-                        '0'
-                    )}**  <@${entry.userId}>  •  **${entry.data.overall} OVR**\n`;
-            }
+    /* ---------------------------------------------------------
+       TOP 3
+    --------------------------------------------------------- */
+
+    if (
+        entries[2]
+    ) {
+
+        description +=
+            '🥉 **TOP 3**\n' +
+
+            `> <@${entries[2].userId}>\n` +
+
+            `> ◈ **${entries[2].data.overall} OVR**\n\n`;
+    }
+
+    /* ---------------------------------------------------------
+       TOP 4-10
+    --------------------------------------------------------- */
+
+    if (
+        entries.length > 3
+    ) {
+
+        description +=
+            '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
+
+        for (
+            let i = 3;
+            i < entries.length;
+            i++
+        ) {
+
+            const entry =
+                entries[i];
+
+            description +=
+                `**${String(
+                    i + 1
+                ).padStart(
+                    2,
+                    '0'
+                )}**  <@${entry.userId}>  •  **${entry.data.overall} OVR**\n`;
         }
-    );
+    }
 
     return new EmbedBuilder()
 
@@ -1531,7 +1488,7 @@ function buildProfileEmbed(
 }
 
 /* =========================================================
-   ANNOUNCEMENT MODAL
+   ANNOUNCEMENT SYSTEM
 ========================================================= */
 
 function announcementModal() {
@@ -1546,10 +1503,8 @@ function announcementModal() {
         )
 
         .addComponents(
-
             new ActionRowBuilder()
                 .addComponents(
-
                     new TextInputBuilder()
                         .setCustomId(
                             'announcement_message'
@@ -1573,16 +1528,11 @@ function announcementModal() {
         );
 }
 
-/* =========================================================
-   ANNOUNCEMENT PLAYER LIST
-========================================================= */
-
 function announcementPlayerList(
     a
 ) {
     if (
-        a.ready.length ===
-        0
+        a.ready.length === 0
     ) {
         return '› Waiting for players...';
     }
@@ -1605,10 +1555,6 @@ function announcementPlayerList(
         );
 }
 
-/* =========================================================
-   ANNOUNCEMENT PROGRESS
-========================================================= */
-
 function announcementProgress(
     a
 ) {
@@ -1629,20 +1575,17 @@ function announcementProgress(
     );
 }
 
-/* =========================================================
-   ANNOUNCEMENT EMBED
-========================================================= */
-
 function announcementEmbed(
     a
 ) {
+
     const remaining =
-        a.phase ===
-            'extension'
+        a.phase === 'extension'
             ? timeLeft(
                 a.extensionEndTime -
                 Date.now()
             )
+
             : timeLeft(
                 a.endTime -
                 Date.now()
@@ -1673,7 +1616,7 @@ function announcementEmbed(
                 : 'STARTS IN'
         } **${remaining}**\n\n` +
 
-        '👑 **Host**\n' +
+        `👑 **Host**\n` +
 
         `<@${a.hostId}>\n\n` +
 
@@ -1755,13 +1698,10 @@ function announcementEmbed(
         });
 }
 
-/* =========================================================
-   ANNOUNCEMENT BUTTONS
-========================================================= */
-
 function announcementButtons(
     a
 ) {
+
     const row = [
 
         new ButtonBuilder()
@@ -1779,7 +1719,7 @@ function announcementButtons(
             )
             .setDisabled(
                 a.ready.length >=
-                MAX_PLAYERS
+                    MAX_PLAYERS
             ),
 
         new ButtonBuilder()
@@ -1801,6 +1741,13 @@ function announcementButtons(
         a.warningSent ||
         a.phase === 'extension'
     ) {
+
+        /*
+         * NO emoji on RE-PING.
+         * This avoids the invalid emoji
+         * problem you had before.
+         */
+
         row.push(
 
             new ButtonBuilder()
@@ -1827,14 +1774,12 @@ function announcementButtons(
     ];
 }
 
-/* =========================================================
-   UPDATE ANNOUNCEMENT
-========================================================= */
-
 async function updateAnnouncement(
     a
 ) {
+
     try {
+
         const channel =
             await client.channels.fetch(
                 a.channelId
@@ -1863,6 +1808,7 @@ async function updateAnnouncement(
         });
 
     } catch (error) {
+
         console.log(
             'Announcement update error:',
             error.message
@@ -1870,14 +1816,12 @@ async function updateAnnouncement(
     }
 }
 
-/* =========================================================
-   HOST REMINDER DM
-========================================================= */
-
 async function sendHostReminderDM(
     a
 ) {
+
     try {
+
         const user =
             await client.users.fetch(
                 a.hostId
@@ -1944,6 +1888,7 @@ async function sendHostReminderDM(
         });
 
     } catch (error) {
+
         console.log(
             'Host DM error:',
             error.message
@@ -1951,15 +1896,13 @@ async function sendHostReminderDM(
     }
 }
 
-/* =========================================================
-   PUBLIC TRYOUT PING
-========================================================= */
-
 async function pingTryoutRole(
     a,
     extension = false
 ) {
+
     try {
+
         const channel =
             await client.channels.fetch(
                 a.channelId
@@ -1969,18 +1912,19 @@ async function pingTryoutRole(
             return;
         }
 
-        const state =
-            extension
-                ? 'RE-PING'
-                : 'STARTING SOON';
-
         if (
             !TRYOUT_PING_ROLE_ID
         ) {
+
             await channel.send({
 
                 content:
-                    `✦ **AUREON TRYOUT ${state}**\n` +
+                    `✦ **AUREON TRYOUT ${
+                        extension
+                            ? 'RE-PING'
+                            : 'STARTING SOON'
+                    }**\n` +
+
                     `**${a.ready.length}/${MAX_PLAYERS}** players are ready.`,
 
                 allowedMentions: {
@@ -1996,7 +1940,11 @@ async function pingTryoutRole(
             content:
                 `<@&${TRYOUT_PING_ROLE_ID}>\n\n` +
 
-                `✦ **AUREON TRYOUT ${state}**\n` +
+                `✦ **AUREON TRYOUT ${
+                    extension
+                        ? 'RE-PING'
+                        : 'STARTING SOON'
+                }**\n` +
 
                 `**${a.ready.length}/${MAX_PLAYERS}** players are ready.`,
 
@@ -2008,6 +1956,7 @@ async function pingTryoutRole(
         });
 
     } catch (error) {
+
         console.log(
             'Ping error:',
             error.message
@@ -2015,14 +1964,11 @@ async function pingTryoutRole(
     }
 }
 
-/* =========================================================
-   FINISH ANNOUNCEMENT
-========================================================= */
-
 async function finishAnnouncement(
     a,
     reason
 ) {
+
     if (
         a.closed
     ) {
@@ -2056,52 +2002,80 @@ async function finishAnnouncement(
             return;
         }
 
-        const isFull =
+        let embed;
+
+        if (
             reason ===
-            'full';
+            'full'
+        ) {
 
-        const embed =
-            new EmbedBuilder()
+            embed =
+                new EmbedBuilder()
 
-                .setColor(
-                    isFull
-                        ? GREEN
-                        : RED
-                )
+                    .setColor(
+                        GREEN
+                    )
 
-                .setAuthor({
-                    name:
-                        '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍 • ᴇᴜ'
-                })
+                    .setAuthor({
+                        name:
+                            '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍 • ᴇᴜ'
+                    })
 
-                .setTitle(
-                    isFull
-                        ? '✅ ᴛʀʏᴏᴜᴛ ʀᴇᴀᴅʏ'
-                        : '❌ ᴛʀʏᴏᴜᴛ ᴄʟᴏsᴇᴅ'
-                )
+                    .setTitle(
+                        '✅ ᴛʀʏᴏᴜᴛ ʀᴇᴀᴅʏ'
+                    )
 
-                .setDescription(
-                    isFull
-                        ? '**10/10 players are ready.**\n\n' +
-                          'The tryout is ready to begin.'
+                    .setDescription(
+                        '**10/10 players are ready.**\n\n' +
+                        'The tryout is ready to begin.'
+                    )
 
-                        : 'The tryout did not reach **10/10** players.\n\n' +
-                          `Final ready count: **${a.ready.length}/${MAX_PLAYERS}**`
-                )
+                    .setFooter({
+                        text:
+                            '✦ A U R E O N • E U ✦'
+                    });
 
-                .setFooter({
-                    text:
-                        '✦ A U R E O N • E U ✦'
-                });
+        } else {
+
+            embed =
+                new EmbedBuilder()
+
+                    .setColor(
+                        RED
+                    )
+
+                    .setAuthor({
+                        name:
+                            '𝐀 𝐔 𝐑 𝐄 ᴏ ɴ • ᴇᴜ'
+                    })
+
+                    .setTitle(
+                        '❌ ᴛʀʏᴏᴜᴛ ᴄʟᴏsᴇᴅ'
+                    )
+
+                    .setDescription(
+
+                        'The tryout did not reach **10/10** players.\n\n' +
+
+                        `Final ready count: **${a.ready.length}/${MAX_PLAYERS}**`
+                    )
+
+                    .setFooter({
+                        text:
+                            '✦ A U R E O N • E U ✦'
+                    });
+        }
 
         await message.edit({
             embeds: [
                 embed
             ],
+
             components: []
         });
 
     } catch (error) {
+
         console.log(
             'Close announcement error:',
             error.message
@@ -2126,6 +2100,7 @@ setInterval(
             if (
                 a.closed
             ) {
+
                 announcements.delete(
                     messageId
                 );
@@ -2164,11 +2139,11 @@ setInterval(
                 !a.warningSent &&
 
                 a.endTime -
-                now <=
-                TWO_MINUTES &&
+                    now <=
+                    TWO_MINUTES &&
 
                 a.endTime -
-                now > 0
+                    now > 0
             ) {
 
                 a.warningSent =
@@ -2186,7 +2161,7 @@ setInterval(
             }
 
             /*
-             * TIMER EXPIRED
+             * ORIGINAL TIMER END
              */
 
             if (
@@ -2194,12 +2169,12 @@ setInterval(
                     'initial' &&
 
                 now >=
-                a.endTime
+                    a.endTime
             ) {
 
                 /*
-                 * RE-PING USED
-                 * → 2 MINUTE EXTENSION
+                 * Only the host's RE-PING
+                 * gives another 2 minutes.
                  */
 
                 if (
@@ -2224,7 +2199,9 @@ setInterval(
                                 a.channelId
                             );
 
-                        if (channel) {
+                        if (
+                            channel
+                        ) {
 
                             await channel.send({
 
@@ -2276,11 +2253,6 @@ setInterval(
 
                 } else {
 
-                    /*
-                     * NO RE-PING
-                     * → CLOSE
-                     */
-
                     await finishAnnouncement(
                         a,
                         'timeout'
@@ -2295,7 +2267,7 @@ setInterval(
             }
 
             /*
-             * EXTENSION EXPIRED
+             * EXTENSION END
              */
 
             if (
@@ -2303,16 +2275,26 @@ setInterval(
                     'extension' &&
 
                 now >=
-                a.extensionEndTime
+                    a.extensionEndTime
             ) {
 
-                await finishAnnouncement(
-                    a,
+                if (
                     a.ready.length >=
-                        MAX_PLAYERS
-                        ? 'full'
-                        : 'timeout'
-                );
+                    MAX_PLAYERS
+                ) {
+
+                    await finishAnnouncement(
+                        a,
+                        'full'
+                    );
+
+                } else {
+
+                    await finishAnnouncement(
+                        a,
+                        'timeout'
+                    );
+                }
 
                 announcements.delete(
                     messageId
@@ -2333,6 +2315,7 @@ async function assignRankRole(
     playerId,
     rank
 ) {
+
     const roleId =
         getRankRoleId(
             rank
@@ -2371,7 +2354,6 @@ async function assignRankRole(
 
     const botMember =
         interaction.guild.members.me ||
-
         await interaction.guild.members
             .fetchMe()
             .catch(
@@ -2407,9 +2389,8 @@ async function assignRankRole(
 
     if (
         rankRole.managed ||
-
         rankRole.position >=
-        botMember.roles.highest.position
+            botMember.roles.highest.position
     ) {
 
         return {
@@ -2491,22 +2472,6 @@ client.once(
         console.log(
             `⚡ Tryout Hoster Role: ${
                 TRYOUT_HOSTER_ROLE_ID
-                    ? 'CONFIGURED'
-                    : 'MISSING'
-            }`
-        );
-
-        console.log(
-            `📣 Tryout Ping Role: ${
-                TRYOUT_PING_ROLE_ID
-                    ? 'CONFIGURED'
-                    : 'MISSING'
-            }`
-        );
-
-        console.log(
-            `🖼️ Banner: ${
-                BANNER_URL
                     ? 'CONFIGURED'
                     : 'MISSING'
             }`
@@ -2639,47 +2604,36 @@ client.on(
                             null
                     };
 
-                    const payload = {
-
-                        embeds: [
-                            tryoutEmbed(
-                                lobby
-                            )
-                        ],
-
-                        components:
-                            tryoutButtons(
-                                lobby
-                            ),
-
-                        allowedMentions: {
-                            parse: []
-                        }
-                    };
-
-                    /*
-                     * Ping role in the public channel.
-                     */
-
-                    if (
-                        TRYOUT_PING_ROLE_ID
-                    ) {
-
-                        payload.content =
-                            `<@&${TRYOUT_PING_ROLE_ID}>`;
-
-                        payload.allowedMentions =
-                            {
-                                roles: [
-                                    TRYOUT_PING_ROLE_ID
-                                ]
-                            };
-                    }
-
                     const message =
-                        await interaction.channel.send(
-                            payload
-                        );
+                        await interaction.channel.send({
+
+                            content:
+                                TRYOUT_PING_ROLE_ID
+                                    ? `<@&${TRYOUT_PING_ROLE_ID}>`
+                                    : undefined,
+
+                            embeds: [
+                                tryoutEmbed(
+                                    lobby
+                                )
+                            ],
+
+                            components:
+                                tryoutButtons(
+                                    lobby
+                                ),
+
+                            allowedMentions:
+                                TRYOUT_PING_ROLE_ID
+                                    ? {
+                                        roles: [
+                                            TRYOUT_PING_ROLE_ID
+                                        ]
+                                    }
+                                    : {
+                                        parse: []
+                                    }
+                        });
 
                     lobby.messageId =
                         message.id;
@@ -2815,10 +2769,6 @@ client.on(
                                         text:
                                             '✦ A U R E O N • E U ✦'
                                     })
-
-                                    .setImage(
-                                        BANNER_URL
-                                    )
                             ],
 
                             components: []
@@ -2906,7 +2856,9 @@ client.on(
 
                     return interaction.reply({
                         embeds: [
-                            buildLeaderboardEmbed()
+                            buildLeaderboardEmbed(
+                                interaction.guild
+                            )
                         ]
                     });
                 }
@@ -3191,50 +3143,49 @@ client.on(
                             false
                     };
 
-                    const payload = {
+                    const firstPing =
+                        TRYOUT_PING_ROLE_ID
+                            ? `<@&${TRYOUT_PING_ROLE_ID}>`
+                            : '';
+
+                    /*
+                     * FIXED:
+                     * announcementButtons() already returns
+                     * an array of ActionRows.
+                     *
+                     * DO NOT wrap it in another [].
+                     */
+
+                    await interaction.reply({
+
+                        content:
+                            firstPing ||
+                            undefined,
 
                         embeds: [
-
-                            announcementEmbed({
-                                ...announcement,
-
-                                messageId:
-                                    'pending'
-                            })
+                            announcementEmbed(
+                                announcement
+                            )
                         ],
 
                         components:
-
                             announcementButtons({
                                 ...announcement,
-
                                 messageId:
                                     'pending'
                             }),
 
-                        allowedMentions: {
-                            parse: []
-                        }
-                    };
-
-                    if (
-                        TRYOUT_PING_ROLE_ID
-                    ) {
-
-                        payload.content =
-                            `<@&${TRYOUT_PING_ROLE_ID}>`;
-
-                        payload.allowedMentions =
-                            {
-                                roles: [
-                                    TRYOUT_PING_ROLE_ID
-                                ]
-                            };
-                    }
-
-                    await interaction.reply(
-                        payload
-                    );
+                        allowedMentions:
+                            TRYOUT_PING_ROLE_ID
+                                ? {
+                                    roles: [
+                                        TRYOUT_PING_ROLE_ID
+                                    ]
+                                }
+                                : {
+                                    parse: []
+                                }
+                    });
 
                     const message =
                         await interaction.fetchReply();
@@ -3378,11 +3329,8 @@ client.on(
                     const stats = {
 
                         shooting,
-
                         passing,
-
                         teamwork,
-
                         gk,
 
                         overall,
@@ -3422,7 +3370,7 @@ client.on(
                         });
                     }
 
-                    return interaction.editReply({
+                    await interaction.editReply({
 
                         embeds: [
 
@@ -3438,10 +3386,12 @@ client.on(
                                 playerId
                             )
                     });
+
+                    return;
                 }
 
                 /* =============================================
-                   SERVER LINK MODAL
+                   SERVER LINK
                 ============================================= */
 
                 if (
@@ -3687,8 +3637,7 @@ client.on(
                         );
 
                     if (
-                        index ===
-                        -1
+                        index === -1
                     ) {
 
                         return interaction.editReply({
@@ -3805,9 +3754,6 @@ client.on(
                                                 lobby.serverLink ||
                                                 ''
                                             )
-                                            .setMaxLength(
-                                                1000
-                                            )
                                     )
                             );
 
@@ -3817,7 +3763,7 @@ client.on(
                 }
 
                 /* =============================================
-                   CLOSE TRYOUT BUTTON
+                   CLOSE TRYOUT
                 ============================================= */
 
                 if (
@@ -4019,8 +3965,7 @@ client.on(
                         );
 
                     if (
-                        index ===
-                        -1
+                        index === -1
                     ) {
 
                         return interaction.reply({
@@ -4176,11 +4121,9 @@ client.on(
 
                     return interaction.showModal(
                         resultModal(
-
                             playerId,
 
                             draft?.stats ||
-
                             getStoredPlayerData(
                                 playerId
                             )
@@ -4236,6 +4179,10 @@ client.on(
                         });
                     }
 
+                    /*
+                     * Defer first.
+                     */
+
                     await interaction.deferUpdate();
 
                     const stats =
@@ -4248,14 +4195,34 @@ client.on(
                             ]
                         );
 
+                    /*
+                     * Preserve ALL completed
+                     * tryout records.
+                     */
+
                     const history =
                         Array.isArray(
                             oldData?.history
                         )
+
                             ? [
                                 ...oldData.history
                             ]
+
                             : [];
+
+                    /*
+                     * IMPORTANT:
+                     *
+                     * THIS is the only point where
+                     * a player's TRYOUTS count increases.
+                     *
+                     * Pressing JOIN does NOT count.
+                     * Pressing READY does NOT count.
+                     * Pressing ANNOUNCE does NOT count.
+                     *
+                     * FINISH = completed tryout.
+                     */
 
                     history.push({
 
@@ -4326,11 +4293,24 @@ client.on(
 
                         history,
 
+                        /*
+                         * Exact number of completed
+                         * result records.
+                         */
+
                         tryoutsCompleted:
                             history.length,
 
+                        /*
+                         * Highest OVR ever recorded.
+                         */
+
                         bestOVR
                     };
+
+                    /*
+                     * Save ONLY after FINISH.
+                     */
 
                     resultsDatabase[
                         playerId
@@ -4503,63 +4483,6 @@ client.on(
 
 normalizeDatabase();
 
-console.log(
-    '🚀 Starting AUREON bot...'
-);
-
 client.login(
-    TOKEN
-)
-    .then(() => {
-
-        console.log(
-            '✅ Discord login request accepted.'
-        );
-
-    })
-    .catch(
-        error => {
-
-            console.error(
-                ''
-            );
-
-            console.error(
-                '======================================'
-            );
-
-            console.error(
-                '❌ DISCORD LOGIN FAILED'
-            );
-
-            console.error(
-                '======================================'
-            );
-
-            console.error(
-                `Error code: ${
-                    error?.code ||
-                    'UNKNOWN'
-                }`
-            );
-
-            console.error(
-                `Error name: ${
-                    error?.name ||
-                    'UNKNOWN'
-                }`
-            );
-
-            console.error(
-                'The token itself was NOT printed.'
-            );
-
-            console.error(
-                ''
-            );
-
-            process.exit(
-                1
-            );
-        }
-    );
+    process.env.TOKEN
+);
