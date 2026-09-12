@@ -33,24 +33,18 @@ if (!GUILD_ID) {
     process.exit(1);
 }
 
-/*
- * =========================================================
- * AUREON • TRYOUT COMMAND
- * Existing commands stay here.
- * SCRIM has been added.
- * =========================================================
- */
+/* =========================================================
+   AUREON • TRYOUT COMMANDS
+========================================================= */
 
 const tryoutCommand =
     new SlashCommandBuilder()
         .setName('tryout')
-        .setDescription(
-            'AUREON Tryout System'
-        )
+        .setDescription('AUREON Tryout System')
 
-        /* =============================================
+        /* =================================================
            CREATE
-        ============================================= */
+        ================================================= */
 
         .addSubcommand(
             subcommand =>
@@ -61,9 +55,9 @@ const tryoutCommand =
                     )
         )
 
-        /* =============================================
+        /* =================================================
            CLOSE
-        ============================================= */
+        ================================================= */
 
         .addSubcommand(
             subcommand =>
@@ -74,9 +68,9 @@ const tryoutCommand =
                     )
         )
 
-        /* =============================================
+        /* =================================================
            RESULTS
-        ============================================= */
+        ================================================= */
 
         .addSubcommand(
             subcommand =>
@@ -87,9 +81,9 @@ const tryoutCommand =
                     )
         )
 
-        /* =============================================
+        /* =================================================
            LEADERBOARD
-        ============================================= */
+        ================================================= */
 
         .addSubcommand(
             subcommand =>
@@ -100,9 +94,9 @@ const tryoutCommand =
                     )
         )
 
-        /* =============================================
+        /* =================================================
            PROFILE
-        ============================================= */
+        ================================================= */
 
         .addSubcommand(
             subcommand =>
@@ -122,9 +116,9 @@ const tryoutCommand =
                     )
         )
 
-        /* =============================================
+        /* =================================================
            ANNOUNCE
-        ============================================= */
+        ================================================= */
 
         .addSubcommand(
             subcommand =>
@@ -165,21 +159,21 @@ const tryoutCommand =
                     )
         )
 
-        /* =============================================
-           NEW • SCRIM
-        ============================================= */
+        /* =================================================
+           SCRIM
+        ================================================= */
 
         .addSubcommand(
             subcommand =>
                 subcommand
                     .setName('scrim')
                     .setDescription(
-                        'Create an AUREON scrim'
+                        'Create an AUREON Friendly or ELO scrim'
                     )
         );
 
 /* =========================================================
-   REGISTER
+   REGISTER COMMAND
 ========================================================= */
 
 const rest =
@@ -190,23 +184,35 @@ const rest =
     );
 
 (async () => {
-
     try {
-
         console.log(
             '🔄 Registering AUREON /tryout command...'
         );
 
-        await rest.put(
+        const commandData =
+            tryoutCommand.toJSON();
 
+        console.log(
+            '📋 Subcommands being registered:'
+        );
+
+        for (
+            const option
+            of commandData.options
+        ) {
+            console.log(
+                `   • /tryout ${option.name}`
+            );
+        }
+
+        await rest.put(
             Routes.applicationGuildCommands(
                 CLIENT_ID,
                 GUILD_ID
             ),
-
             {
                 body: [
-                    tryoutCommand.toJSON()
+                    commandData
                 ]
             }
         );
@@ -223,7 +229,7 @@ const rest =
         );
         console.log('');
         console.log(
-            'Available commands:'
+            'Registered commands:'
         );
         console.log(
             '  /tryout create'
@@ -247,16 +253,18 @@ const rest =
             '  /tryout scrim'
         );
         console.log('');
-
     } catch (error) {
-
+        console.error('');
         console.error(
-            '❌ Failed to register commands:'
+            '======================================'
         );
-
         console.error(
-            error
+            '❌ FAILED TO REGISTER COMMANDS'
         );
+        console.error(
+            '======================================'
+        );
+        console.error(error);
+        console.error('');
     }
-
 })();
