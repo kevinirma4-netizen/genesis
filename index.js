@@ -20,6 +20,17 @@ const {
 
 /* =========================================================
    AUREON TRYOUT BOT • FULL FIXED VERSION
+   Includes:
+   - Tryouts
+   - Results
+   - Leaderboard
+   - Profiles
+   - Announcements
+   - Friendly / ELO Scrims
+   - Infinite Scrim Queue
+   - Position selection
+   - 2-minute position coverage countdown
+   - Random 5-player selection
 ========================================================= */
 
 const client = new Client({
@@ -33,43 +44,282 @@ const client = new Client({
 ========================================================= */
 
 const MAX_PLAYERS = 10;
-const TWO_MINUTES = 2 * 60 * 1000;
-const TIMER_CHECK = 5000;
 
-const GOLD = 0xD9B45C;
-const GREEN = 0x5BC47B;
-const RED = 0xB84949;
+const TWO_MINUTES =
+    2 * 60 * 1000;
+
+const TIMER_CHECK =
+    5000;
+
+const SCRIM_SELECTED_PLAYERS =
+    5;
+
+const SCRIM_START_DELAY =
+    2 * 60 * 1000;
+
+const SCRIM_RANDOM_DELAY =
+    1500;
+
+const SCRIM_POSITIONS = [
+    'CF',
+    'CM',
+    'GK',
+    'RW',
+    'LW'
+];
+
+const GOLD =
+    0xD9B45C;
+
+const GREEN =
+    0x5BC47B;
+
+const RED =
+    0xB84949;
 
 /* =========================================================
    BANNER
 ========================================================= */
 
-/*
- * This is your original banner.
- * It is used automatically when Railway BANNER_URL
- * is missing or contains something that is NOT a URL.
- */
-
 const DEFAULT_BANNER_URL =
-    'https://cdn.discordapp.com/attachments/1546557355313856603/1548019473561423963/bannrerrer.jpg?ex=6aa588fb&is=6aa4377b&hm=762cdee4242861c771a2b3750408fc0ba7b098d33fbefea17760cda296ea23d4';
+    'https://i.ibb.co/v6LyGZj4/bannrerrer.jpg';
 
 const configuredBanner =
     typeof process.env.BANNER_URL === 'string'
-        ? process.env.BANNER_URL.trim()
+        ? process.env.BANNER_URL.trim().replace(/^[\"']|[\"']$/g, '')
         : '';
 
-/*
- * IMPORTANT:
- * If Railway accidentally gives us a role ID such as
- * 1546580353148395590, it will NOT be used as a banner.
- */
-
 const BANNER_URL =
-    /^https?:\/\/\S+$/i.test(
-        configuredBanner
-    )
+    /^https?:\/\/\S+$/i.test(configuredBanner)
         ? configuredBanner
         : DEFAULT_BANNER_URL;
+/*
+ * Discord needs the actual image URL.
+ *
+ * Important:
+ * https://ibb.co/XXXXXXX
+ * is an ImgBB webpage URL, not the image itself.
+ *
+ * This resolver attempts to convert an ImgBB page URL
+ * into its og:image direct image URL.
+ */
+
+async function resolveBannerUrl(url) {
+    if (
+        !/^https?:\/\/\S+$/i.test(
+            url
+        )
+    ) {
+        return '';
+    }
+
+    try {
+        const parsed =
+            new URL(url);
+
+        const host =
+            parsed.hostname.toLowerCase();
+
+        /*
+         * ImgBB page URLs
+         */
+        if (
+            host === 'ibb.co' ||
+            host === 'www.ibb.co'
+        ) {
+            if (
+                typeof fetch !== 'function'
+            ) {
+                console.error(
+                    '❌ Banner resolver requires Node.js 18+.'
+                );
+
+                return '';
+            }
+
+            const response =
+                await fetch(
+                    url,
+                    {
+                        redirect:
+                            'follow',
+
+                        headers: {
+                            'User-Agent':
+                                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36',
+
+                            'Accept':
+                                'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+                        }
+                    }
+                );
+
+            if (
+                !response.ok
+            ) {
+                console.error(
+                    `❌ Banner page returned HTTP ${response.status}.`
+                );
+
+                return '';
+            }
+
+            const html =
+                await response.text();
+
+            const metaTags =
+                html.match(
+                    /<meta\b[^>]*>/gi
+                ) || [];
+
+            /*
+             * First look for OpenGraph image.
+             */
+            for (
+                const tag
+                of metaTags
+            ) {
+                const propertyMatch =
+                    tag.match(
+                        /\b(?:property|name)=["']([^"']+)["']/i
+                    );
+
+                const contentMatch =
+                    tag.match(
+                        /\bcontent=["']([^"']+)["']/i
+                    );
+
+                if (
+                    !propertyMatch ||
+                    !contentMatch
+                ) {
+                    continue;
+                }
+
+                const property =
+                    propertyMatch[1]
+                        .toLowerCase();
+
+                if (
+                    property !==
+                    'og:image' &&
+                    property !==
+                    'twitter:image' &&
+                    property !==
+                    'twitter:image:src'
+                ) {
+                    continue;
+                }
+
+                const imageUrl =
+                    contentMatch[1]
+                        .replace(
+                            /&amp;/g,
+                            '&'
+                        )
+                        .trim();
+
+                if (
+                    /^https?:\/\/\S+$/i.test(
+                        imageUrl
+                    )
+                ) {
+                    return imageUrl;
+                }
+            }
+
+            /*
+             * Fallback:
+             * Find a direct i.ibb.co image URL
+             * in the HTML source.
+             */
+            const directMatches =
+                html.match(
+                    /https?:\/\/(?:i\.)?ibb\.co\/[^"'<>\s]+\.(?:png|jpe?g|webp|gif)(?:\?[^"'<>\s]*)?/gi
+                ) || [];
+
+            if (
+                directMatches.length >
+                0
+            ) {
+                return directMatches[0]
+                    .replace(
+                        /&amp;/g,
+                        '&'
+                    );
+            }
+
+            console.error(
+                '❌ Could not find the direct ImgBB image URL.'
+            );
+
+            return '';
+        }
+
+        /*
+         * Any other URL is assumed to already be
+         * a direct image URL.
+         */
+        return url;
+    } catch (
+        error
+    ) {
+        console.error(
+            '❌ Banner URL resolution failed:',
+            error.message
+        );
+
+        return '';
+    }
+}
+
+async function initializeBanner() {
+    const sourceUrl =
+        /^https?:\/\/\S+$/i.test(
+            configuredBanner
+        )
+            ? configuredBanner
+            : DEFAULT_BANNER_URL;
+
+    if (
+        !sourceUrl
+    ) {
+        BANNER_URL = '';
+        console.log(
+            '🖼️ Banner URL ready: NO'
+        );
+        return;
+    }
+
+    const resolved =
+        await resolveBannerUrl(
+            sourceUrl
+        );
+
+    if (
+        resolved
+    ) {
+        BANNER_URL =
+            resolved;
+    } else if (
+        /^https?:\/\/\S+$/i.test(
+            configuredBanner
+        )
+    ) {
+        /*
+         * Keep a configured direct image URL
+         * even if resolving wasn't necessary.
+         */
+        BANNER_URL =
+            configuredBanner;
+    } else {
+        BANNER_URL = '';
+    }
+
+    console.log(
+        `🖼️ Banner URL ready: ${BANNER_URL ? 'YES' : 'NO'}`
+    );
+}
 
 /* =========================================================
    TOKEN
@@ -84,20 +334,24 @@ const TOKEN =
     typeof rawToken === 'string'
         ? rawToken
             .trim()
-            .replace(/^["']|["']$/g, '')
-            .replace(/^Bot\s+/i, '')
+            .replace(
+                /^["']|["']$/g,
+                ''
+            )
+            .replace(
+                /^Bot\s+/i,
+                ''
+            )
             .trim()
         : '';
 
-if (!TOKEN) {
-    console.error('');
-    console.error('======================================');
-    console.error('❌ DISCORD BOT TOKEN IS MISSING');
-    console.error('======================================');
-    console.error('');
-    console.error('Railway Variable required:');
-    console.error('TOKEN = your Discord bot token');
-    console.error('');
+if (
+    !TOKEN
+) {
+    console.error(
+        '❌ DISCORD BOT TOKEN IS MISSING'
+    );
+
     process.exit(1);
 }
 
@@ -105,9 +359,12 @@ if (!TOKEN) {
    ROLE CONFIG
 ========================================================= */
 
-function cleanRoleId(value) {
+function cleanRoleId(
+    value
+) {
     if (
-        typeof value !== 'string'
+        typeof value !==
+        'string'
     ) {
         return '';
     }
@@ -115,12 +372,9 @@ function cleanRoleId(value) {
     const id =
         value.trim();
 
-    /*
-     * Discord snowflake IDs are numeric.
-     * This prevents random text/URLs from being treated as IDs.
-     */
-
-    return /^\d{17,20}$/.test(id)
+    return /^\d{17,20}$/.test(
+        id
+    )
         ? id
         : '';
 }
@@ -135,31 +389,41 @@ const TRYOUT_PING_ROLE_ID =
         process.env.TRYOUT_PING_ROLE_ID
     );
 
+const MAIN_TEAM_ROLE_ID =
+    cleanRoleId(
+        process.env.MAIN_TEAM_ROLE_ID
+    );
+
+const FRIENDLY_SCRIM_PING_ROLE_ID =
+    cleanRoleId(
+        process.env.FRIENDLY_SCRIM_PING_ROLE_ID
+    );
+
+const ELO_SCRIM_PING_ROLE_ID =
+    cleanRoleId(
+        process.env.ELO_SCRIM_PING_ROLE_ID
+    );
+
 const RANK_ROLE_IDS = {
-    F:
-        cleanRoleId(
-            process.env.AURE_RANK_F_ROLE_ID
-        ),
+    F: cleanRoleId(
+        process.env.AURE_RANK_F_ROLE_ID
+    ),
 
-    C:
-        cleanRoleId(
-            process.env.AURE_RANK_C_ROLE_ID
-        ),
+    C: cleanRoleId(
+        process.env.AURE_RANK_C_ROLE_ID
+    ),
 
-    B:
-        cleanRoleId(
-            process.env.AURE_RANK_B_ROLE_ID
-        ),
+    B: cleanRoleId(
+        process.env.AURE_RANK_B_ROLE_ID
+    ),
 
-    A:
-        cleanRoleId(
-            process.env.AURE_RANK_A_ROLE_ID
-        ),
+    A: cleanRoleId(
+        process.env.AURE_RANK_A_ROLE_ID
+    ),
 
-    S:
-        cleanRoleId(
-            process.env.AURE_RANK_S_ROLE_ID
-        )
+    S: cleanRoleId(
+        process.env.AURE_RANK_S_ROLE_ID
+    )
 };
 
 /* =========================================================
@@ -176,6 +440,9 @@ const announcements =
     new Map();
 
 const pendingAnnouncements =
+    new Map();
+
+const scrims =
     new Map();
 
 /* =========================================================
@@ -202,7 +469,8 @@ if (
     fs.mkdirSync(
         dataFolder,
         {
-            recursive: true
+            recursive:
+                true
         }
     );
 }
@@ -223,10 +491,6 @@ if (
     );
 }
 
-/* =========================================================
-   LOAD RESULTS
-========================================================= */
-
 function loadResults() {
     try {
         return JSON.parse(
@@ -235,7 +499,9 @@ function loadResults() {
                 'utf8'
             )
         );
-    } catch (error) {
+    } catch (
+        error
+    ) {
         console.error(
             '❌ Could not load player results:',
             error
@@ -248,10 +514,6 @@ function loadResults() {
 let resultsDatabase =
     loadResults();
 
-/* =========================================================
-   SAVE RESULTS
-========================================================= */
-
 function saveResults() {
     try {
         fs.writeFileSync(
@@ -263,7 +525,9 @@ function saveResults() {
             ),
             'utf8'
         );
-    } catch (error) {
+    } catch (
+        error
+    ) {
         console.error(
             '❌ Could not save player results:',
             error
@@ -272,25 +536,33 @@ function saveResults() {
 }
 
 /* =========================================================
-   RANK
+   RANK / PLAYER DATA
 ========================================================= */
 
 function getRank(
     overall
 ) {
-    if (overall >= 80) {
+    if (
+        overall >= 80
+    ) {
         return 'S';
     }
 
-    if (overall >= 65) {
+    if (
+        overall >= 65
+    ) {
         return 'A';
     }
 
-    if (overall >= 50) {
+    if (
+        overall >= 50
+    ) {
         return 'B';
     }
 
-    if (overall >= 30) {
+    if (
+        overall >= 30
+    ) {
         return 'C';
     }
 
@@ -301,33 +573,23 @@ function getRankText(
     rank
 ) {
     return {
-        S:
-            'S • ELITE',
-
-        A:
-            'A • ADVANCED',
-
-        B:
-            'B • STRONG',
-
-        C:
-            'C • DEVELOPING',
-
-        F:
-            'F • BEGINNER'
-    }[rank] || rank;
+        S: 'S • ELITE',
+        A: 'A • ADVANCED',
+        B: 'B • STRONG',
+        C: 'C • DEVELOPING',
+        F: 'F • BEGINNER'
+    }[
+        rank
+    ] || rank;
 }
-
-/* =========================================================
-   PLAYER DATA
-========================================================= */
 
 function normalizePlayerData(
     data
 ) {
     if (
         !data ||
-        typeof data !== 'object'
+        typeof data !==
+            'object'
     ) {
         return null;
     }
@@ -382,18 +644,25 @@ function normalizePlayerData(
             ? data.history.filter(
                 entry =>
                     entry &&
-                    typeof entry === 'object'
+                    typeof entry ===
+                        'object'
             )
             : [];
 
     if (
-        history.length === 0 &&
+        history.length ===
+            0 &&
         (
-            data.overall !== undefined ||
-            data.shooting !== undefined ||
-            data.passing !== undefined ||
-            data.teamwork !== undefined ||
-            data.gk !== undefined
+            data.overall !==
+                undefined ||
+            data.shooting !==
+                undefined ||
+            data.passing !==
+                undefined ||
+            data.teamwork !==
+                undefined ||
+            data.gk !==
+                undefined
         )
     ) {
         history.push(
@@ -449,14 +718,17 @@ function normalizePlayerData(
         );
 
     const latest =
-        history.length > 0
+        history.length >
+        0
             ? history[
-                history.length - 1
+                history.length -
+                1
             ]
             : legacyResult;
 
     const bestOVR =
-        history.length > 0
+        history.length >
+        0
             ? Math.max(
                 ...history.map(
                     entry =>
@@ -506,10 +778,6 @@ function normalizePlayerData(
     };
 }
 
-/* =========================================================
-   NORMALIZE DATABASE
-========================================================= */
-
 function normalizeDatabase() {
     let changed = false;
 
@@ -517,7 +785,8 @@ function normalizeDatabase() {
         const [
             userId,
             data
-        ] of Object.entries(
+        ]
+        of Object.entries(
             resultsDatabase
         )
     ) {
@@ -526,7 +795,9 @@ function normalizeDatabase() {
                 data
             );
 
-        if (!normalized) {
+        if (
+            !normalized
+        ) {
             continue;
         }
 
@@ -538,21 +809,22 @@ function normalizeDatabase() {
                 data
             )
         ) {
-            resultsDatabase[userId] =
+            resultsDatabase[
+                userId
+            ] =
                 normalized;
 
-            changed = true;
+            changed =
+                true;
         }
     }
 
-    if (changed) {
+    if (
+        changed
+    ) {
         saveResults();
     }
 }
-
-/* =========================================================
-   GET PLAYER
-========================================================= */
 
 function getStoredPlayerData(
     userId
@@ -562,7 +834,9 @@ function getStoredPlayerData(
             userId
         ];
 
-    if (!data) {
+    if (
+        !data
+    ) {
         return null;
     }
 
@@ -571,13 +845,16 @@ function getStoredPlayerData(
             data
         );
 
-    if (!normalized) {
+    if (
+        !normalized
+    ) {
         return null;
     }
 
     resultsDatabase[
         userId
-    ] = normalized;
+    ] =
+        normalized;
 
     return normalized;
 }
@@ -592,10 +869,20 @@ function isTryoutHoster(
     return Boolean(
         member &&
         TRYOUT_HOSTER_ROLE_ID &&
-        member.roles &&
-        member.roles.cache &&
-        member.roles.cache.has(
+        member.roles?.cache?.has(
             TRYOUT_HOSTER_ROLE_ID
+        )
+    );
+}
+
+function isMainTeam(
+    member
+) {
+    return Boolean(
+        member &&
+        MAIN_TEAM_ROLE_ID &&
+        member.roles?.cache?.has(
+            MAIN_TEAM_ROLE_ID
         )
     );
 }
@@ -632,10 +919,12 @@ function formatTime(
     amount
 ) {
     if (
-        unit === 'minutes'
+        unit ===
+        'minutes'
     ) {
         return (
-            `${amount} minute${
+            `${amount} minute` +
+            `${
                 amount === 1
                     ? ''
                     : 's'
@@ -644,7 +933,8 @@ function formatTime(
     }
 
     return (
-        `${amount} hour${
+        `${amount} hour` +
+        `${
             amount === 1
                 ? ''
                 : 's'
@@ -675,8 +965,10 @@ function timeLeft(
         minutes <= 0
     ) {
         return (
-            `${remainingSeconds} second${
-                remainingSeconds === 1
+            `${remainingSeconds} second` +
+            `${
+                remainingSeconds ===
+                1
                     ? ''
                     : 's'
             }`
@@ -684,10 +976,12 @@ function timeLeft(
     }
 
     if (
-        remainingSeconds === 0
+        remainingSeconds ===
+        0
     ) {
         return (
-            `${minutes} minute${
+            `${minutes} minute` +
+            `${
                 minutes === 1
                     ? ''
                     : 's'
@@ -705,15 +999,18 @@ function timeLeft(
 ========================================================= */
 
 function updatePresence() {
-    if (!client.user) {
+    if (
+        !client.user
+    ) {
         return;
     }
 
-    let totalPlayers = 0;
+    let totalPlayers =
+        0;
 
     for (
-        const lobby of
-            tryouts.values()
+        const lobby
+        of tryouts.values()
     ) {
         totalPlayers +=
             lobby.players.length;
@@ -723,9 +1020,11 @@ function updatePresence() {
         activities: [
             {
                 name:
-                    totalPlayers > 0
+                    totalPlayers >
+                    0
                         ? `AUREON • ${totalPlayers} Player${
-                            totalPlayers === 1
+                            totalPlayers ===
+                            1
                                 ? ''
                                 : 's'
                         }`
@@ -742,14 +1041,15 @@ function updatePresence() {
 }
 
 /* =========================================================
-   TRYOUT HUB EMBED
+   TRYOUT HUB
 ========================================================= */
 
 function tryoutEmbed(
     lobby
 ) {
     const playerList =
-        lobby.players.length > 0
+        lobby.players.length >
+        0
             ? lobby.players
                 .map(
                     (
@@ -758,7 +1058,9 @@ function tryoutEmbed(
                     ) =>
                         `**${index + 1}.** <@${id}>`
                 )
-                .join('\n')
+                .join(
+                    '\n'
+                )
             : '`Waiting for players...`';
 
     const filled =
@@ -766,7 +1068,8 @@ function tryoutEmbed(
             (
                 lobby.players.length /
                 MAX_PLAYERS
-            ) * 10
+            ) *
+            10
         );
 
     const bar =
@@ -774,7 +1077,8 @@ function tryoutEmbed(
             filled
         ) +
         '▱'.repeat(
-            10 - filled
+            10 -
+            filled
         );
 
     let serverText =
@@ -784,15 +1088,10 @@ function tryoutEmbed(
         lobby.players.length ===
         MAX_PLAYERS
     ) {
-        if (
+        serverText =
             lobby.serverLink
-        ) {
-            serverText =
-                `[🔗 Join Private Server](${lobby.serverLink})`;
-        } else {
-            serverText =
-                '⚠️ 10/10 reached — host has not added a server link yet.';
-        }
+                ? `[🔗 Join Private Server](${lobby.serverLink})`
+                : '⚠️ 10/10 reached — host has not added a server link yet.';
     }
 
     const embed =
@@ -800,34 +1099,23 @@ function tryoutEmbed(
             .setColor(
                 GOLD
             )
-
             .setAuthor({
                 name:
                     '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍'
             })
-
             .setTitle(
                 'ᴛʀʏᴏᴜᴛ ʜᴜʙ'
             )
-
             .setDescription(
                 '✦ **L O B B Y** ✦\n\n' +
-
                 '👑 **Host**\n' +
-
                 `<@${lobby.hostId}>\n\n` +
-
                 `✦ **Players** — ${lobby.players.length}/${MAX_PLAYERS}\n` +
-
                 `${bar}\n\n` +
-
                 '**PLAYER LIST**\n' +
-
                 `${playerList}\n\n` +
-
                 '━━━━━━━━━━━━━━━━━━━━━━━━'
             )
-
             .addFields({
                 name:
                     '🔗 SERVER',
@@ -838,16 +1126,10 @@ function tryoutEmbed(
                 inline:
                     false
             })
-
             .setFooter({
                 text:
                     '✦ A U R E O N • E U ✦'
             });
-
-    /*
-     * Always use a validated URL.
-     * This can no longer throw because of a role ID.
-     */
 
     if (
         /^https?:\/\/\S+$/i.test(
@@ -862,17 +1144,12 @@ function tryoutEmbed(
     return embed;
 }
 
-/* =========================================================
-   TRYOUT BUTTONS
-========================================================= */
-
 function tryoutButtons(
     lobby
 ) {
     return [
         new ActionRowBuilder()
             .addComponents(
-
                 new ButtonBuilder()
                     .setCustomId(
                         'tryout_join'
@@ -937,7 +1214,1046 @@ function tryoutButtons(
 }
 
 /* =========================================================
-   RESULT EMBED
+   SCRIM SYSTEM
+========================================================= */
+
+function getScrim(
+    messageId
+) {
+    return (
+        scrims.get(
+            messageId
+        ) ||
+        null
+    );
+}
+
+function scrimTypeText(
+    type
+) {
+    return type ===
+        'elo'
+        ? '🔴 ELO SCRIM'
+        : '🟢 FRIENDLY SCRIM';
+}
+
+function scrimPositionEmoji(
+    position
+) {
+    return {
+        CF: '⚽',
+        CM: '🎯',
+        GK: '🧤',
+        RW: '🏃',
+        LW: '💨'
+    }[
+        position
+    ] || '⚽';
+}
+
+function getPositionPlayers(
+    scrim,
+    position
+) {
+    return scrim.players
+        .filter(
+            player =>
+                player.position ===
+                position
+        );
+}
+
+function allPositionsCovered(
+    scrim
+) {
+    return SCRIM_POSITIONS.every(
+        position =>
+            getPositionPlayers(
+                scrim,
+                position
+            ).length >
+            0
+    );
+}
+
+function scrimCountdownText(
+    scrim
+) {
+    if (
+        !allPositionsCovered(
+            scrim
+        )
+    ) {
+        const missing =
+            SCRIM_POSITIONS.filter(
+                position =>
+                    getPositionPlayers(
+                        scrim,
+                        position
+                    ).length ===
+                    0
+            );
+
+        return (
+            `⏳ **Waiting for:** ` +
+            missing
+                .map(
+                    p =>
+                        `${scrimPositionEmoji(p)} ${p}`
+                )
+                .join(
+                    ' • '
+                )
+        );
+    }
+
+    if (
+        scrim.countdownEndTime
+    ) {
+        const remaining =
+            scrim.countdownEndTime -
+            Date.now();
+
+        if (
+            remaining >
+            0
+        ) {
+            return (
+                `⏱️ **Random pick starts in ${timeLeft(remaining)}**`
+            );
+        }
+    }
+
+    return (
+        '🎲 **Random pick is starting...**'
+    );
+}
+
+function scrimPositionButtonLabel(
+    scrim,
+    position
+) {
+    const players =
+        getPositionPlayers(
+            scrim,
+            position
+        );
+
+    if (
+        players.length ===
+        0
+    ) {
+        return (
+            `${position} — EMPTY`
+        );
+    }
+
+    if (
+        players.length ===
+        1
+    ) {
+        return (
+            `${position} — ${players[0].displayName}`
+        ).slice(
+            0,
+            80
+        );
+    }
+
+    return (
+        `${position} — ${players.length} players`
+    );
+}
+
+function scrimChooseEmbed(
+    scrim
+) {
+    const embed =
+        new EmbedBuilder()
+            .setColor(
+                GOLD
+            )
+            .setAuthor({
+                name:
+                    '✦ A U R E O N • S C R I M ✦'
+            })
+            .setTitle(
+                '⚡ ᴄʜᴏᴏsᴇ sᴄʀɪᴍ ᴛʏᴘᴇ'
+            )
+            .setDescription(
+                '╭──────────────────────────────╮\n' +
+                '│       **CHOOSE SCRIM TYPE**     │\n' +
+                '╰──────────────────────────────╯\n\n' +
+                '🟢 **FRIENDLY**\n' +
+                '> Everyone can participate.\n' +
+                '> Rank does not matter.\n\n' +
+                '🔴 **ELO**\n' +
+                '> Main Team players only.\n' +
+                '> Requires the Main Team role.\n\n' +
+                '━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+                '👑 **Host**\n' +
+                `<@${scrim.hostId}>`
+            )
+            .setFooter({
+                text:
+                    '✦ A U R E O N • E U ✦'
+            });
+
+    if (
+        /^https?:\/\/\S+$/i.test(
+            BANNER_URL
+        )
+    ) {
+        embed.setImage(
+            BANNER_URL
+        );
+    }
+
+    return embed;
+}
+
+function scrimTypeButtons() {
+    return [
+        new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId(
+                        'scrim_type:friendly'
+                    )
+                    .setLabel(
+                        'FRIENDLY'
+                    )
+                    .setEmoji(
+                        '🟢'
+                    )
+                    .setStyle(
+                        ButtonStyle.Success
+                    ),
+
+                new ButtonBuilder()
+                    .setCustomId(
+                        'scrim_type:elo'
+                    )
+                    .setLabel(
+                        'ELO'
+                    )
+                    .setEmoji(
+                        '🔴'
+                    )
+                    .setStyle(
+                        ButtonStyle.Danger
+                    )
+            )
+    ];
+}
+
+function scrimPositionEmbed(
+    scrim
+) {
+    const positionLines =
+        SCRIM_POSITIONS
+            .map(
+                position => {
+                    const players =
+                        getPositionPlayers(
+                            scrim,
+                            position
+                        );
+
+                    const names =
+                        players.length >
+                        0
+                            ? players
+                                .map(
+                                    player =>
+                                        `<@${player.id}>`
+                                )
+                                .join(
+                                    ', '
+                                )
+                            : '`— empty —`';
+
+                    return (
+                        `${scrimPositionEmoji(position)} **${position}** — ${names}`
+                    );
+                }
+            )
+            .join(
+                '\n'
+            );
+
+    const queue =
+        scrim.players.length >
+        0
+            ? scrim.players
+                .map(
+                    (
+                        player,
+                        index
+                    ) =>
+                        `**${String(index + 1).padStart(2, '0')}.** <@${player.id}> • **${player.position}**`
+                )
+                .join(
+                    '\n'
+                )
+            : '`Waiting for players...`';
+
+    const countdown =
+        scrimCountdownText(
+            scrim
+        );
+
+    const embed =
+        new EmbedBuilder()
+            .setColor(
+                scrim.type ===
+                    'elo'
+                    ? RED
+                    : GREEN
+            )
+            .setAuthor({
+                name:
+                    '✦ A U R E O N • S C R I M ✦'
+            })
+            .setTitle(
+                scrimTypeText(
+                    scrim.type
+                )
+            )
+            .setDescription(
+                '╭──────────────────────────────╮\n' +
+                '│        **SELECT POSITION**     │\n' +
+                '╰──────────────────────────────╯\n\n' +
+                `${scrimPositionEmoji('CF')} **Choose one position.**\n` +
+                'You can change your position at any time before the random pick.\n\n' +
+                `👥 **${scrim.players.length} / ∞ players**\n` +
+                `${countdown}\n\n` +
+                '━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+                '**POSITION LINEUP**\n' +
+                `${positionLines}\n\n` +
+                '━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
+                '**PLAYER QUEUE**\n' +
+                `${queue}`
+            )
+            .addFields({
+                name:
+                    '🔗 SERVER',
+
+                value:
+                    scrim.serverLink
+                        ? `[🔗 Join Server](${scrim.serverLink})`
+                        : '🔒 Host has not added a server link yet.',
+
+                inline:
+                    false
+            })
+            .setFooter({
+                text:
+                    '✦ 5 PLAYERS WILL BE RANDOMLY SELECTED • A U R E O N ✦'
+            });
+
+    if (
+        /^https?:\/\/\S+$/i.test(
+            BANNER_URL
+        )
+    ) {
+        embed.setImage(
+            BANNER_URL
+        );
+    }
+
+    return embed;
+}
+
+function scrimPositionButtons(
+    scrim
+) {
+    const row1 =
+        new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId(
+                        `scrim_pos:CF:${scrim.messageId}`
+                    )
+                    .setLabel(
+                        scrimPositionButtonLabel(
+                            scrim,
+                            'CF'
+                        )
+                    )
+                    .setEmoji(
+                        '⚽'
+                    )
+                    .setStyle(
+                        ButtonStyle.Primary
+                    ),
+
+                new ButtonBuilder()
+                    .setCustomId(
+                        `scrim_pos:CM:${scrim.messageId}`
+                    )
+                    .setLabel(
+                        scrimPositionButtonLabel(
+                            scrim,
+                            'CM'
+                        )
+                    )
+                    .setEmoji(
+                        '🎯'
+                    )
+                    .setStyle(
+                        ButtonStyle.Primary
+                    ),
+
+                new ButtonBuilder()
+                    .setCustomId(
+                        `scrim_pos:GK:${scrim.messageId}`
+                    )
+                    .setLabel(
+                        scrimPositionButtonLabel(
+                            scrim,
+                            'GK'
+                        )
+                    )
+                    .setEmoji(
+                        '🧤'
+                    )
+                    .setStyle(
+                        ButtonStyle.Primary
+                    )
+            );
+
+    const row2 =
+        new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId(
+                        `scrim_pos:RW:${scrim.messageId}`
+                    )
+                    .setLabel(
+                        scrimPositionButtonLabel(
+                            scrim,
+                            'RW'
+                        )
+                    )
+                    .setEmoji(
+                        '🏃'
+                    )
+                    .setStyle(
+                        ButtonStyle.Primary
+                    ),
+
+                new ButtonBuilder()
+                    .setCustomId(
+                        `scrim_pos:LW:${scrim.messageId}`
+                    )
+                    .setLabel(
+                        scrimPositionButtonLabel(
+                            scrim,
+                            'LW'
+                        )
+                    )
+                    .setEmoji(
+                        '💨'
+                    )
+                    .setStyle(
+                        ButtonStyle.Primary
+                    )
+            );
+
+    const row3 =
+        new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId(
+                        `scrim_leave:${scrim.messageId}`
+                    )
+                    .setLabel(
+                        'LEAVE'
+                    )
+                    .setEmoji(
+                        '↩️'
+                    )
+                    .setStyle(
+                        ButtonStyle.Secondary
+                    ),
+
+                new ButtonBuilder()
+                    .setCustomId(
+                        `scrim_link:${scrim.messageId}`
+                    )
+                    .setLabel(
+                        'SERVER LINK'
+                    )
+                    .setEmoji(
+                        '🔗'
+                    )
+                    .setStyle(
+                        ButtonStyle.Primary
+                    ),
+
+                new ButtonBuilder()
+                    .setCustomId(
+                        `scrim_close:${scrim.messageId}`
+                    )
+                    .setLabel(
+                        'CLOSE'
+                    )
+                    .setEmoji(
+                        '❌'
+                    )
+                    .setStyle(
+                        ButtonStyle.Danger
+                    )
+            );
+
+    return [
+        row1,
+        row2,
+        row3
+    ];
+}
+
+function scrimRandomEmbed(
+    scrim
+) {
+    const embed =
+        new EmbedBuilder()
+            .setColor(
+                GOLD
+            )
+            .setAuthor({
+                name:
+                    '✦ A U R E O N • S C R I M ✦'
+            })
+            .setTitle(
+                '🎲 ʀᴀɴᴅᴏᴍ ᴘɪᴄᴋ'
+            )
+            .setDescription(
+                `> **${scrimTypeText(scrim.type)}**\n\n` +
+                '╭──────────────────────────────╮\n' +
+                '│       **SELECTING PLAYERS**    │\n' +
+                '╰──────────────────────────────╯\n\n' +
+                `👥 **${scrim.players.length} players joined**\n` +
+                `🎯 **${SCRIM_SELECTED_PLAYERS} players needed**\n\n` +
+                'The bot is randomly selecting **one player for each position**.\n\n' +
+                '⚽ CF\n' +
+                '🎯 CM\n' +
+                '🧤 GK\n' +
+                '🏃 RW\n' +
+                '💨 LW'
+            )
+            .setFooter({
+                text:
+                    '✦ RANDOM PICK • A U R E O N ✦'
+            });
+
+    if (
+        /^https?:\/\/\S+$/i.test(
+            BANNER_URL
+        )
+    ) {
+        embed.setImage(
+            BANNER_URL
+        );
+    }
+
+    return embed;
+}
+
+function scrimReadyEmbed(
+    scrim
+) {
+    const selectedLines =
+        scrim.selected
+            .map(
+                player =>
+                    `${scrimPositionEmoji(player.position)} **${player.position}**  •  <@${player.id}>`
+            )
+            .join(
+                '\n'
+            );
+
+    const embed =
+        new EmbedBuilder()
+            .setColor(
+                scrim.type ===
+                    'elo'
+                    ? RED
+                    : GREEN
+            )
+            .setAuthor({
+                name:
+                    '✦ A U R E O N • S C R I M ✦'
+            })
+            .setTitle(
+                '⚡ sᴄʀɪᴍ ʀᴇᴀᴅʏ'
+            )
+            .setDescription(
+                `> **${scrimTypeText(scrim.type)}**\n\n` +
+                '╭──────────────────────────────╮\n' +
+                '│       **SELECTED LINEUP**      │\n' +
+                '╰──────────────────────────────╯\n\n' +
+                `${selectedLines}\n\n` +
+                '━━━━━━━━━━━━━━━━━━━━━━━━'
+            )
+            .addFields({
+                name:
+                    '🔗 SERVER LINK',
+
+                value:
+                    scrim.serverLink
+                        ? `[🔗 JOIN SERVER](${scrim.serverLink})`
+                        : '🔒 Host has not added the server link yet.',
+
+                inline:
+                    false
+            })
+            .setFooter({
+                text:
+                    '✦ 5 / 5 PLAYERS • A U R E O N • E U ✦'
+            });
+
+    if (
+        /^https?:\/\/\S+$/i.test(
+            BANNER_URL
+        )
+    ) {
+        embed.setImage(
+            BANNER_URL
+        );
+    }
+
+    return embed;
+}
+
+function scrimReadyButtons(
+    scrim
+) {
+    return [
+        new ActionRowBuilder()
+            .addComponents(
+                new ButtonBuilder()
+                    .setCustomId(
+                        `scrim_link:${scrim.messageId}`
+                    )
+                    .setLabel(
+                        'SERVER LINK'
+                    )
+                    .setEmoji(
+                        '🔗'
+                    )
+                    .setStyle(
+                        ButtonStyle.Primary
+                    ),
+
+                new ButtonBuilder()
+                    .setCustomId(
+                        `scrim_close:${scrim.messageId}`
+                    )
+                    .setLabel(
+                        'CLOSE'
+                    )
+                    .setEmoji(
+                        '❌'
+                    )
+                    .setStyle(
+                        ButtonStyle.Danger
+                    )
+            )
+    ];
+}
+
+async function updateScrimMessage(
+    scrim
+) {
+    try {
+        const channel =
+            await client.channels.fetch(
+                scrim.channelId
+            );
+
+        if (
+            !channel
+        ) {
+            return;
+        }
+
+        const message =
+            await channel.messages.fetch(
+                scrim.messageId
+            );
+
+        if (
+            !message
+        ) {
+            return;
+        }
+
+        if (
+            scrim.phase ===
+            'choose'
+        ) {
+            await message.edit({
+                embeds: [
+                    scrimChooseEmbed(
+                        scrim
+                    )
+                ],
+                components:
+                    scrimTypeButtons()
+            });
+
+            return;
+        }
+
+        if (
+            scrim.phase ===
+            'queue'
+        ) {
+            await message.edit({
+                embeds: [
+                    scrimPositionEmbed(
+                        scrim
+                    )
+                ],
+                components:
+                    scrimPositionButtons(
+                        scrim
+                    )
+            });
+
+            return;
+        }
+
+        if (
+            scrim.phase ===
+            'picking'
+        ) {
+            await message.edit({
+                embeds: [
+                    scrimRandomEmbed(
+                        scrim
+                    )
+                ],
+
+                components:
+                    []
+            });
+
+            return;
+        }
+
+        if (
+            scrim.phase ===
+            'ready'
+        ) {
+            await message.edit({
+                embeds: [
+                    scrimReadyEmbed(
+                        scrim
+                    )
+                ],
+
+                components:
+                    scrimReadyButtons(
+                        scrim
+                    )
+            });
+        }
+    } catch (
+        error
+    ) {
+        console.log(
+            'Scrim update error:',
+            error.message
+        );
+    }
+}
+
+async function pingScrimRole(
+    scrim
+) {
+    try {
+        const channel =
+            await client.channels.fetch(
+                scrim.channelId
+            );
+
+        if (
+            !channel
+        ) {
+            return;
+        }
+
+        const roleId =
+            scrim.type ===
+            'friendly'
+                ? FRIENDLY_SCRIM_PING_ROLE_ID
+                : ELO_SCRIM_PING_ROLE_ID;
+
+        if (
+            !roleId
+        ) {
+            return;
+        }
+
+        await channel.send({
+            content:
+                `<@&${roleId}>\n\n` +
+                `✦ **AUREON ${scrim.type.toUpperCase()} SCRIM OPEN**\n` +
+                'Choose your position below to enter the queue.',
+
+            allowedMentions: {
+                roles: [
+                    roleId
+                ]
+            }
+        });
+    } catch (
+        error
+    ) {
+        console.log(
+            'Scrim ping error:',
+            error.message
+        );
+    }
+}
+
+async function startScrimCountdownIfReady(
+    scrim
+) {
+    if (
+        !scrim ||
+        scrim.phase !==
+            'queue'
+    ) {
+        return false;
+    }
+
+    if (
+        !allPositionsCovered(
+            scrim
+        )
+    ) {
+        scrim.countdownEndTime =
+            null;
+
+        return false;
+    }
+
+    if (
+        !scrim.countdownEndTime
+    ) {
+        scrim.countdownEndTime =
+            Date.now() +
+            SCRIM_START_DELAY;
+
+        await updateScrimMessage(
+            scrim
+        );
+    }
+
+    return true;
+}
+
+async function startScrimRandomPick(
+    scrim
+) {
+    if (
+        !scrim ||
+        scrim.phase !==
+            'queue' ||
+        scrim.picking
+    ) {
+        return;
+    }
+
+    if (
+        !allPositionsCovered(
+            scrim
+        )
+    ) {
+        return;
+    }
+
+    scrim.picking =
+        true;
+
+    scrim.phase =
+        'picking';
+
+    scrim.countdownEndTime =
+        null;
+
+    await updateScrimMessage(
+        scrim
+    );
+
+    setTimeout(
+        async () => {
+            await finalizeScrimRandomPick(
+                scrim
+            );
+        },
+        SCRIM_RANDOM_DELAY
+    );
+}
+
+async function finalizeScrimRandomPick(
+    scrim
+) {
+    try {
+        const selected =
+            [];
+
+        for (
+            const position
+            of SCRIM_POSITIONS
+        ) {
+            const candidates =
+                getPositionPlayers(
+                    scrim,
+                    position
+                );
+
+            if (
+                candidates.length ===
+                0
+            ) {
+                scrim.phase =
+                    'queue';
+
+                scrim.picking =
+                    false;
+
+                scrim.countdownEndTime =
+                    null;
+
+                await updateScrimMessage(
+                    scrim
+                );
+
+                return;
+            }
+
+            const randomIndex =
+                Math.floor(
+                    Math.random() *
+                    candidates.length
+                );
+
+            selected.push(
+                candidates[
+                    randomIndex
+                ]
+            );
+        }
+
+        scrim.selected =
+            selected;
+
+        scrim.phase =
+            'ready';
+
+        scrim.picking =
+            false;
+
+        await updateScrimMessage(
+            scrim
+        );
+    } catch (
+        error
+    ) {
+        scrim.phase =
+            'queue';
+
+        scrim.picking =
+            false;
+
+        scrim.countdownEndTime =
+            null;
+
+        console.log(
+            'Scrim finalize error:',
+            error.message
+        );
+    }
+}
+
+/* =========================================================
+   SCRIM TIMER
+========================================================= */
+
+setInterval(
+    async () => {
+        for (
+            const [
+                messageId,
+                scrim
+            ]
+            of scrims
+        ) {
+            if (
+                !scrim ||
+                scrim.phase !==
+                    'queue'
+            ) {
+                continue;
+            }
+
+            if (
+                !allPositionsCovered(
+                    scrim
+                )
+            ) {
+                if (
+                    scrim.countdownEndTime
+                ) {
+                    scrim.countdownEndTime =
+                        null;
+
+                    await updateScrimMessage(
+                        scrim
+                    );
+                }
+
+                continue;
+            }
+
+            if (
+                !scrim.countdownEndTime
+            ) {
+                scrim.countdownEndTime =
+                    Date.now() +
+                    SCRIM_START_DELAY;
+
+                await updateScrimMessage(
+                    scrim
+                );
+
+                continue;
+            }
+
+            if (
+                Date.now() >=
+                scrim.countdownEndTime
+            ) {
+                await startScrimRandomPick(
+                    scrim
+                );
+            } else {
+                await updateScrimMessage(
+                    scrim
+                );
+            }
+        }
+    },
+    TIMER_CHECK
+);
+
+/* =========================================================
+   RESULT SYSTEM
 ========================================================= */
 
 function resultEmbed(
@@ -946,26 +2262,21 @@ function resultEmbed(
     preview = false
 ) {
     return new EmbedBuilder()
-
         .setColor(
             GOLD
         )
-
         .setAuthor({
             name:
                 '✦ A U R E O N • T R Y O U T ✦'
         })
-
         .setTitle(
             `${user.username} • RESULT`
         )
-
         .setDescription(
             `> **${stats.overall} OVR** • ◆ **${stats.rank}** • ${getRankText(stats.rank)}\n\n` +
             '━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
             '✦ **PERFORMANCE BREAKDOWN** ✦'
         )
-
         .addFields(
             {
                 name:
@@ -1045,14 +2356,12 @@ function resultEmbed(
                     false
             }
         )
-
         .setThumbnail(
             user.displayAvatarURL({
                 size:
                     256
             })
         )
-
         .setFooter({
             text:
                 preview
@@ -1060,10 +2369,6 @@ function resultEmbed(
                     : '✦ OFFICIAL AUREON TRYOUT RESULT ✦'
         });
 }
-
-/* =========================================================
-   RESULT MODAL
-========================================================= */
 
 function resultModal(
     playerId,
@@ -1085,9 +2390,8 @@ function resultModal(
             style,
             value,
             required = true
-        ) => {
-
-            return new TextInputBuilder()
+        ) =>
+            new TextInputBuilder()
                 .setCustomId(
                     id
                 )
@@ -1109,17 +2413,16 @@ function resultModal(
                 .setValue(
                     value
                 );
-        };
 
     modal.addComponents(
-
         new ActionRowBuilder()
             .addComponents(
                 makeInput(
                     'shooting',
                     'Shooting (0-100)',
                     TextInputStyle.Short,
-                    existing?.shooting !== undefined
+                    existing?.shooting !==
+                        undefined
                         ? String(
                             existing.shooting
                         )
@@ -1133,7 +2436,8 @@ function resultModal(
                     'passing',
                     'Passing (0-100)',
                     TextInputStyle.Short,
-                    existing?.passing !== undefined
+                    existing?.passing !==
+                        undefined
                         ? String(
                             existing.passing
                         )
@@ -1147,7 +2451,8 @@ function resultModal(
                     'teamwork',
                     'Teamwork (0-100)',
                     TextInputStyle.Short,
-                    existing?.teamwork !== undefined
+                    existing?.teamwork !==
+                        undefined
                         ? String(
                             existing.teamwork
                         )
@@ -1161,7 +2466,8 @@ function resultModal(
                     'gk',
                     'GK (0-100)',
                     TextInputStyle.Short,
-                    existing?.gk !== undefined
+                    existing?.gk !==
+                        undefined
                         ? String(
                             existing.gk
                         )
@@ -1185,17 +2491,12 @@ function resultModal(
     return modal;
 }
 
-/* =========================================================
-   RESULT PREVIEW BUTTONS
-========================================================= */
-
 function resultPreviewButtons(
     playerId
 ) {
     return [
         new ActionRowBuilder()
             .addComponents(
-
                 new ButtonBuilder()
                     .setCustomId(
                         `result_edit:${playerId}`
@@ -1228,20 +2529,20 @@ function resultPreviewButtons(
 }
 
 /* =========================================================
-   LEADERBOARD
+   LEADERBOARD / PROFILE
 ========================================================= */
 
 function getLeaderboardEntries() {
     return Object.entries(
         resultsDatabase
     )
-
         .map(
-            ([
-                userId,
-                raw
-            ]) => {
-
+            (
+                [
+                    userId,
+                    raw
+                ]
+            ) => {
                 const data =
                     normalizePlayerData(
                         raw
@@ -1250,14 +2551,15 @@ function getLeaderboardEntries() {
                 if (
                     !data ||
                     data.tryoutsCompleted <
-                    1
+                        1
                 ) {
                     return null;
                 }
 
                 resultsDatabase[
                     userId
-                ] = data;
+                ] =
+                    data;
 
                 return {
                     userId,
@@ -1265,17 +2567,14 @@ function getLeaderboardEntries() {
                 };
             }
         )
-
         .filter(
             Boolean
         )
-
         .sort(
             (
                 a,
                 b
             ) => {
-
                 if (
                     b.data.overall !==
                     a.data.overall
@@ -1317,7 +2616,6 @@ function getLeaderboardEntries() {
                 );
             }
         )
-
         .slice(
             0,
             10
@@ -1325,33 +2623,27 @@ function getLeaderboardEntries() {
 }
 
 function buildLeaderboardEmbed() {
-
     const entries =
         getLeaderboardEntries();
 
     if (
-        entries.length === 0
+        entries.length ===
+        0
     ) {
-
         return new EmbedBuilder()
-
             .setColor(
                 GOLD
             )
-
             .setAuthor({
                 name:
                     '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍 • ᴇᴜ'
             })
-
             .setTitle(
                 '✦ ᴛʀʏᴏᴜᴛ ʟᴇᴀᴅᴇʀʙᴏᴀʀᴅ'
             )
-
             .setDescription(
                 'No completed tryout results have been recorded yet.'
             )
-
             .setFooter({
                 text:
                     '✦ TOP 10 • A U R E O N ✦'
@@ -1361,91 +2653,72 @@ function buildLeaderboardEmbed() {
     let description =
         '✦ **TOP 10 PLAYERS** ✦\n\n';
 
-    const medals = [
-        '🥇',
-        '🥈',
-        '🥉'
-    ];
+    const medals =
+        [
+            '🥇',
+            '🥈',
+            '🥉'
+        ];
 
     entries.forEach(
         (
             entry,
             index
         ) => {
-
             if (
-                index < 3
+                index <
+                3
             ) {
-
                 description +=
                     `${medals[index]} **TOP ${index + 1}**\n` +
-
                     `> <@${entry.userId}>\n` +
-
                     `> ◈ **${entry.data.overall} OVR**\n`;
 
                 if (
-                    index === 0
+                    index ===
+                    0
                 ) {
-
                     description +=
                         `> TRYOUTS    **${entry.data.tryoutsCompleted}**\n` +
-
                         `> BEST OVR   **${entry.data.bestOVR}**\n`;
                 }
 
                 description +=
                     '\n';
-
             } else {
-
                 if (
-                    index === 3
+                    index ===
+                    3
                 ) {
-
                     description +=
                         '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
                 }
 
                 description +=
-                    `**${String(
-                        index + 1
-                    ).padStart(
-                        2,
-                        '0'
-                    )}**  <@${entry.userId}>  •  **${entry.data.overall} OVR**\n`;
+                    `**${String(index + 1).padStart(2, '0')}**  <@${entry.userId}>  •  **${entry.data.overall} OVR**\n`;
             }
         }
     );
 
     return new EmbedBuilder()
-
         .setColor(
             GOLD
         )
-
         .setAuthor({
             name:
                 '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍 • ᴇᴜ'
         })
-
         .setTitle(
             '✦ ᴛʀʏᴏᴜᴛ ʟᴇᴀᴅᴇʀʙᴏᴀʀᴅ'
         )
-
         .setDescription(
             description
         )
-
         .setFooter({
             text:
                 '✦ TOP 10 • CURRENT OVR • A U R E O N ✦'
         });
 }
-
-/* =========================================================
-   PROFILE
-========================================================= */
 
 function buildProfileEmbed(
     userId
@@ -1458,34 +2731,25 @@ function buildProfileEmbed(
     if (
         !data ||
         data.tryoutsCompleted <
-        1
+            1
     ) {
         return null;
     }
 
     return new EmbedBuilder()
-
         .setColor(
             GOLD
         )
-
         .setAuthor({
             name:
                 '✦ A U R E O N • PLAYER PROFILE ✦'
         })
-
         .setDescription(
             `<@${userId}>\n\n` +
-
             `> **${data.overall} OVR**\n` +
-
-            `> **${getRankText(
-                data.rank
-            )}**\n\n` +
-
+            `> **${getRankText(data.rank)}**\n\n` +
             '━━━━━━━━━━━━━━━━━━━━━━━━'
         )
-
         .addFields(
             {
                 name:
@@ -1573,7 +2837,6 @@ function buildProfileEmbed(
                     false
             }
         )
-
         .setFooter({
             text:
                 '✦ A U R E O N • E U ✦'
@@ -1581,26 +2844,20 @@ function buildProfileEmbed(
 }
 
 /* =========================================================
-   ANNOUNCEMENT MODAL
+   ANNOUNCEMENTS
 ========================================================= */
 
 function announcementModal() {
-
     return new ModalBuilder()
-
         .setCustomId(
             'tryout_announce_modal'
         )
-
         .setTitle(
             'AUREON • TRYOUT ANNOUNCEMENT'
         )
-
         .addComponents(
-
             new ActionRowBuilder()
                 .addComponents(
-
                     new TextInputBuilder()
                         .setCustomId(
                             'announcement_message'
@@ -1624,49 +2881,34 @@ function announcementModal() {
         );
 }
 
-/* =========================================================
-   ANNOUNCEMENT PLAYER LIST
-========================================================= */
-
 function announcementPlayerList(
     a
 ) {
-
     if (
         a.ready.length ===
         0
     ) {
-        return '› Waiting for players...';
+        return (
+            '› Waiting for players...'
+        );
     }
 
     return a.ready
-
         .map(
             (
                 id,
                 index
             ) =>
-                `**${String(
-                    index + 1
-                ).padStart(
-                    2,
-                    '0'
-                )}.** <@${id}>`
+                `**${String(index + 1).padStart(2, '0')}.** <@${id}>`
         )
-
         .join(
             '\n'
         );
 }
 
-/* =========================================================
-   ANNOUNCEMENT PROGRESS
-========================================================= */
-
 function announcementProgress(
     a
 ) {
-
     const count =
         Math.min(
             MAX_PLAYERS,
@@ -1677,7 +2919,6 @@ function announcementProgress(
         '▰'.repeat(
             count
         ) +
-
         '▱'.repeat(
             MAX_PLAYERS -
             count
@@ -1685,23 +2926,16 @@ function announcementProgress(
     );
 }
 
-/* =========================================================
-   ANNOUNCEMENT EMBED
-========================================================= */
-
 function announcementEmbed(
     a
 ) {
-
     const remaining =
         a.phase ===
             'extension'
-
             ? timeLeft(
                 a.extensionEndTime -
                 Date.now()
             )
-
             : timeLeft(
                 a.endTime -
                 Date.now()
@@ -1714,68 +2948,47 @@ function announcementEmbed(
         a.phase ===
         'extension'
     ) {
-
         title =
             '✦ ⚠️ ᴇxᴛᴇɴsɪᴏɴ';
-
     } else if (
         a.warningSent
     ) {
-
         title =
             '✦ ⚠️ ᴄʟᴏsɪɴɢ sᴏᴏɴ';
     }
 
     let description =
-        `> ${
-            a.phase === 'extension'
-                ? 'EXTENSION'
-                : 'STARTS IN'
-        } **${remaining}**\n\n` +
-
+        `> ${a.phase === 'extension' ? 'EXTENSION' : 'STARTS IN'} **${remaining}**\n\n` +
         '👑 **Host**\n' +
-
         `<@${a.hostId}>\n\n` +
-
         '━━━━━━━━━━━━━━━━━━━━━━━━\n\n' +
-
         `⚡ **READY — ${a.ready.length}/${MAX_PLAYERS}**\n` +
-
         `${announcementProgress(a)}\n\n` +
-
         '**READY PLAYERS**\n' +
-
         `${announcementPlayerList(a)}`;
 
     if (
         a.customMessage
     ) {
-
         description +=
             `\n\n💬 **MESSAGE**\n${a.customMessage}`;
     }
 
     return new EmbedBuilder()
-
         .setColor(
             GOLD
         )
-
         .setAuthor({
             name:
                 '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍 • ᴇᴜ'
         })
-
         .setTitle(
             title
         )
-
         .setDescription(
             description
         )
-
         .addFields(
-
             {
                 name:
                     'TIME',
@@ -1797,36 +3010,25 @@ function announcementEmbed(
                 value:
                     a.phase ===
                         'extension'
-
                         ? '⚠️ Extension active'
-
                         : a.warningSent
-
                             ? '⚠️ Closing soon'
-
                             : '🟢 Open',
 
                 inline:
                     true
             }
         )
-
         .setFooter({
             text:
                 '✦ READY to join • NOT READY to leave • A U R E O N ✦'
         });
 }
 
-/* =========================================================
-   ANNOUNCEMENT BUTTONS
-========================================================= */
-
 function announcementButtons(
     a
 ) {
-
     const row = [
-
         new ButtonBuilder()
             .setCustomId(
                 `announcement_ready:${a.messageId}`
@@ -1863,11 +3065,9 @@ function announcementButtons(
     if (
         a.warningSent ||
         a.phase ===
-        'extension'
+            'extension'
     ) {
-
         row.push(
-
             new ButtonBuilder()
                 .setCustomId(
                     `announcement_reping:${a.messageId}`
@@ -1892,22 +3092,18 @@ function announcementButtons(
     ];
 }
 
-/* =========================================================
-   UPDATE ANNOUNCEMENT
-========================================================= */
-
 async function updateAnnouncement(
     a
 ) {
-
     try {
-
         const channel =
             await client.channels.fetch(
                 a.channelId
             );
 
-        if (!channel) {
+        if (
+            !channel
+        ) {
             return;
         }
 
@@ -1916,22 +3112,27 @@ async function updateAnnouncement(
                 a.messageId
             );
 
-        if (!message) {
+        if (
+            !message
+        ) {
             return;
         }
 
         await message.edit({
-
             embeds: [
-                announcementEmbed(a)
+                announcementEmbed(
+                    a
+                )
             ],
 
             components:
-                announcementButtons(a)
+                announcementButtons(
+                    a
+                )
         });
-
-    } catch (error) {
-
+    } catch (
+        error
+    ) {
         console.log(
             'Announcement update error:',
             error.message
@@ -1939,53 +3140,35 @@ async function updateAnnouncement(
     }
 }
 
-/* =========================================================
-   HOST REMINDER DM
-========================================================= */
-
 async function sendHostReminderDM(
     a
 ) {
-
     try {
-
         const user =
             await client.users.fetch(
                 a.hostId
             );
 
         await user.send({
-
             embeds: [
-
                 new EmbedBuilder()
-
                     .setColor(
                         GOLD
                     )
-
                     .setAuthor({
                         name:
                             '✦ A U R E O N • E U ✦'
                     })
-
                     .setTitle(
                         '⚠️ ᴛʀʏᴏᴜᴛ ʀᴇᴍɪɴᴅᴇʀ'
                     )
-
                     .setDescription(
-
                         'Your tryout is **2 minutes away**.\n\n' +
-
                         `⚡ **READY: ${a.ready.length}/${MAX_PLAYERS}**\n\n` +
-
                         '**READY PLAYERS**\n' +
-
                         `${announcementPlayerList(a)}\n\n` +
-
                         'Use **RE-PING** to send the Tryout Ping role in the public announcement channel.'
                     )
-
                     .setFooter({
                         text:
                             '✦ HOST ONLY • A U R E O N ✦'
@@ -1993,10 +3176,8 @@ async function sendHostReminderDM(
             ],
 
             components: [
-
                 new ActionRowBuilder()
                     .addComponents(
-
                         new ButtonBuilder()
                             .setCustomId(
                                 `announcement_reping:${a.messageId}`
@@ -2013,9 +3194,9 @@ async function sendHostReminderDM(
                     )
             ]
         });
-
-    } catch (error) {
-
+    } catch (
+        error
+    ) {
         console.log(
             'Host DM error:',
             error.message
@@ -2023,23 +3204,19 @@ async function sendHostReminderDM(
     }
 }
 
-/* =========================================================
-   PUBLIC TRYOUT PING
-========================================================= */
-
 async function pingTryoutRole(
     a,
     extension = false
 ) {
-
     try {
-
         const channel =
             await client.channels.fetch(
                 a.channelId
             );
 
-        if (!channel) {
+        if (
+            !channel
+        ) {
             return;
         }
 
@@ -2051,16 +3228,13 @@ async function pingTryoutRole(
         if (
             !TRYOUT_PING_ROLE_ID
         ) {
-
             await channel.send({
-
                 content:
-                    `✦ **AUREON TRYOUT ${state}**\n` +
-
-                    `**${a.ready.length}/${MAX_PLAYERS}** players are ready.`,
+                    `✦ **AUREON TRYOUT ${state}**\n**${a.ready.length}/${MAX_PLAYERS}** players are ready.`,
 
                 allowedMentions: {
-                    parse: []
+                    parse:
+                        []
                 }
             });
 
@@ -2068,12 +3242,9 @@ async function pingTryoutRole(
         }
 
         await channel.send({
-
             content:
                 `<@&${TRYOUT_PING_ROLE_ID}>\n\n` +
-
                 `✦ **AUREON TRYOUT ${state}**\n` +
-
                 `**${a.ready.length}/${MAX_PLAYERS}** players are ready.`,
 
             allowedMentions: {
@@ -2082,9 +3253,9 @@ async function pingTryoutRole(
                 ]
             }
         });
-
-    } catch (error) {
-
+    } catch (
+        error
+    ) {
         console.log(
             'Ping error:',
             error.message
@@ -2092,15 +3263,10 @@ async function pingTryoutRole(
     }
 }
 
-/* =========================================================
-   FINISH ANNOUNCEMENT
-========================================================= */
-
 async function finishAnnouncement(
     a,
     reason
 ) {
-
     if (
         a.closed
     ) {
@@ -2111,26 +3277,28 @@ async function finishAnnouncement(
         true;
 
     try {
-
         const channel =
             await client.channels.fetch(
                 a.channelId
             );
 
-        if (!channel) {
+        if (
+            !channel
+        ) {
             return;
         }
 
         const message =
-            await channel.messages
-                .fetch(
-                    a.messageId
-                )
-                .catch(
-                    () => null
-                );
+            await channel.messages.fetch(
+                a.messageId
+            ).catch(
+                () =>
+                    null
+            );
 
-        if (!message) {
+        if (
+            !message
+        ) {
             return;
         }
 
@@ -2140,53 +3308,42 @@ async function finishAnnouncement(
 
         const embed =
             new EmbedBuilder()
-
                 .setColor(
                     isFull
                         ? GREEN
                         : RED
                 )
-
                 .setAuthor({
                     name:
                         '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍 • ᴇᴜ'
                 })
-
                 .setTitle(
                     isFull
                         ? '✅ ᴛʀʏᴏᴜᴛ ʀᴇᴀᴅʏ'
                         : '❌ ᴛʀʏᴏᴜᴛ ᴄʟᴏsᴇᴅ'
                 )
-
                 .setDescription(
-
                     isFull
-
-                        ? '**10/10 players are ready.**\n\n' +
-
-                          'The tryout is ready to begin.'
-
+                        ? '**10/10 players are ready.**\n\nThe tryout is ready to begin.'
                         : 'The tryout did not reach **10/10** players.\n\n' +
-
-                          `Final ready count: **${a.ready.length}/${MAX_PLAYERS}**`
+                        `Final ready count: **${a.ready.length}/${MAX_PLAYERS}**`
                 )
-
                 .setFooter({
                     text:
                         '✦ A U R E O N • E U ✦'
                 });
 
         await message.edit({
-
             embeds: [
                 embed
             ],
 
-            components: []
+            components:
+                []
         });
-
-    } catch (error) {
-
+    } catch (
+        error
+    ) {
         console.log(
             'Close announcement error:',
             error.message
@@ -2200,18 +3357,16 @@ async function finishAnnouncement(
 
 setInterval(
     async () => {
-
         for (
             const [
                 messageId,
                 a
-            ] of announcements
+            ]
+            of announcements
         ) {
-
             if (
                 a.closed
             ) {
-
                 announcements.delete(
                     messageId
                 );
@@ -2223,7 +3378,6 @@ setInterval(
                 a.ready.length >=
                 MAX_PLAYERS
             ) {
-
                 await finishAnnouncement(
                     a,
                     'full'
@@ -2239,24 +3393,16 @@ setInterval(
             const now =
                 Date.now();
 
-            /* =============================================
-               2 MINUTE WARNING
-            ============================================= */
-
             if (
                 a.phase ===
                     'initial' &&
-
                 !a.warningSent &&
-
                 a.endTime -
-                now <=
-                TWO_MINUTES &&
-
+                    now <=
+                    TWO_MINUTES &&
                 a.endTime -
-                now > 0
+                    now > 0
             ) {
-
                 a.warningSent =
                     true;
 
@@ -2271,27 +3417,15 @@ setInterval(
                 continue;
             }
 
-            /* =============================================
-               TIMER EXPIRED
-            ============================================= */
-
             if (
                 a.phase ===
                     'initial' &&
-
                 now >=
-                a.endTime
+                    a.endTime
             ) {
-
-                /*
-                 * RE-PING USED
-                 * → 2 MINUTE EXTENSION
-                 */
-
                 if (
                     a.repingUsed
                 ) {
-
                     a.phase =
                         'extension';
 
@@ -2304,7 +3438,6 @@ setInterval(
                     );
 
                     try {
-
                         const channel =
                             await client.channels.fetch(
                                 a.channelId
@@ -2313,33 +3446,23 @@ setInterval(
                         if (
                             channel
                         ) {
-
                             await channel.send({
-
                                 content:
                                     `<@${a.hostId}>`,
 
                                 embeds: [
-
                                     new EmbedBuilder()
-
                                         .setColor(
                                             GOLD
                                         )
-
                                         .setTitle(
                                             '⚠️ 2-MINUTE EXTENSION'
                                         )
-
                                         .setDescription(
-
                                             `The lobby is still **${a.ready.length}/${MAX_PLAYERS}**.\n\n` +
-
                                             'You now have **2 more minutes**.\n\n' +
-
                                             'If the lobby stays below 10/10, the tryout will close.'
                                         )
-
                                         .setFooter({
                                             text:
                                                 '✦ A U R E O N • E U ✦'
@@ -2353,17 +3476,15 @@ setInterval(
                                 }
                             });
                         }
-
-                    } catch (error) {
-
+                    } catch (
+                        error
+                    ) {
                         console.log(
                             'Extension message error:',
                             error.message
                         );
                     }
-
                 } else {
-
                     await finishAnnouncement(
                         a,
                         'timeout'
@@ -2377,27 +3498,17 @@ setInterval(
                 continue;
             }
 
-            /* =============================================
-               EXTENSION EXPIRED
-            ============================================= */
-
             if (
                 a.phase ===
                     'extension' &&
-
                 now >=
-                a.extensionEndTime
+                    a.extensionEndTime
             ) {
-
                 await finishAnnouncement(
-
                     a,
-
                     a.ready.length >=
                         MAX_PLAYERS
-
                         ? 'full'
-
                         : 'timeout'
                 );
 
@@ -2406,13 +3517,12 @@ setInterval(
                 );
             }
         }
-
     },
     TIMER_CHECK
 );
 
 /* =========================================================
-   RANK ROLE
+   RANK ROLE ASSIGNMENT
 ========================================================= */
 
 async function assignRankRole(
@@ -2420,14 +3530,14 @@ async function assignRankRole(
     playerId,
     rank
 ) {
-
     const roleId =
         getRankRoleId(
             rank
         );
 
-    if (!roleId) {
-
+    if (
+        !roleId
+    ) {
         return {
             ok:
                 false,
@@ -2443,11 +3553,13 @@ async function assignRankRole(
                 playerId
             )
             .catch(
-                () => null
+                () =>
+                    null
             );
 
-    if (!member) {
-
+    if (
+        !member
+    ) {
         return {
             ok:
                 false,
@@ -2459,15 +3571,16 @@ async function assignRankRole(
 
     const botMember =
         interaction.guild.members.me ||
-
         await interaction.guild.members
             .fetchMe()
             .catch(
-                () => null
+                () =>
+                    null
             );
 
-    if (!botMember) {
-
+    if (
+        !botMember
+    ) {
         return {
             ok:
                 false,
@@ -2482,8 +3595,9 @@ async function assignRankRole(
             roleId
         );
 
-    if (!rankRole) {
-
+    if (
+        !rankRole
+    ) {
         return {
             ok:
                 false,
@@ -2495,11 +3609,10 @@ async function assignRankRole(
 
     if (
         rankRole.managed ||
-
         rankRole.position >=
-        botMember.roles.highest.position
+            botMember.roles.highest
+                .position
     ) {
-
         return {
             ok:
                 false,
@@ -2517,7 +3630,6 @@ async function assignRankRole(
         );
 
     try {
-
         const oldRankRoles =
             member.roles.cache.filter(
                 role =>
@@ -2529,7 +3641,6 @@ async function assignRankRole(
         if (
             oldRankRoles.size
         ) {
-
             await member.roles.remove(
                 oldRankRoles
             );
@@ -2546,9 +3657,9 @@ async function assignRankRole(
             roleName:
                 rankRole.name
         };
-
-    } catch (error) {
-
+    } catch (
+        error
+    ) {
         console.error(
             '❌ Rank role assignment failed:',
             error
@@ -2571,7 +3682,6 @@ async function assignRankRole(
 client.once(
     'clientReady',
     readyClient => {
-
         console.log(
             `✅ Logged in as ${readyClient.user.tag}`
         );
@@ -2589,6 +3699,30 @@ client.once(
                 TRYOUT_PING_ROLE_ID
                     ? 'CONFIGURED'
                     : 'MISSING'
+            }`
+        );
+
+        console.log(
+            `👑 Main Team Role: ${
+                MAIN_TEAM_ROLE_ID
+                    ? 'CONFIGURED'
+                    : 'MISSING'
+            }`
+        );
+
+        console.log(
+            `🟢 Friendly Scrim Ping: ${
+                FRIENDLY_SCRIM_PING_ROLE_ID
+                    ? 'CONFIGURED'
+                    : 'MISSING'
+            }`
+        );
+
+        console.log(
+            `🔴 ELO Scrim Ping: ${
+                ELO_SCRIM_PING_ROLE_ID
+                    ? 'CONFIGURED'
+                    : 'NOT CONFIGURED'
             }`
         );
 
@@ -2621,7 +3755,8 @@ client.once(
                 data =>
                     normalizePlayerData(
                         data
-                    )?.tryoutsCompleted > 0
+                    )?.tryoutsCompleted >
+                    0
             ).length;
 
         console.log(
@@ -2643,17 +3778,14 @@ client.once(
 client.on(
     'interactionCreate',
     async interaction => {
-
         try {
-
-            /* =================================================
+            /* =====================================================
                SLASH COMMANDS
-            ================================================= */
+            ===================================================== */
 
             if (
                 interaction.isChatInputCommand()
             ) {
-
                 if (
                     interaction.commandName !==
                     'tryout'
@@ -2664,23 +3796,152 @@ client.on(
                 const subcommand =
                     interaction.options.getSubcommand();
 
-                /* =============================================
-                   CREATE
-                ============================================= */
+                /* =================================================
+                   SCRIM
+                ================================================= */
 
                 if (
                     subcommand ===
-                    'create'
+                    'scrim'
                 ) {
-
                     if (
                         !isTryoutHoster(
                             interaction.member
                         )
                     ) {
-
                         return interaction.reply({
+                            content:
+                                '❌ You must be a **Tryout Hoster** to create a scrim.',
 
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    const existingTryout =
+                        [
+                            ...tryouts.values()
+                        ].find(
+                            lobby =>
+                                lobby.hostId ===
+                                interaction.user.id
+                        );
+
+                    const existingScrim =
+                        [
+                            ...scrims.values()
+                        ].find(
+                            scrim =>
+                                scrim.hostId ===
+                                interaction.user.id
+                        );
+
+                    if (
+                        existingTryout
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ You already have an active tryout lobby.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    if (
+                        existingScrim
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ You already have an active scrim.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    const scrim = {
+                        hostId:
+                            interaction.user.id,
+
+                        guildId:
+                            interaction.guildId,
+
+                        channelId:
+                            interaction.channelId,
+
+                        messageId:
+                            null,
+
+                        type:
+                            null,
+
+                        phase:
+                            'choose',
+
+                        players:
+                            [],
+
+                        selected:
+                            [],
+
+                        serverLink:
+                            null,
+
+                        countdownEndTime:
+                            null,
+
+                        picking:
+                            false
+                    };
+
+                    const message =
+                        await interaction.channel.send({
+                            embeds: [
+                                scrimChooseEmbed(
+                                    scrim
+                                )
+                            ],
+
+                            components:
+                                scrimTypeButtons(),
+
+                            allowedMentions: {
+                                parse: []
+                            }
+                        });
+
+                    scrim.messageId =
+                        message.id;
+
+                    scrims.set(
+                        message.id,
+                        scrim
+                    );
+
+                    return interaction.reply({
+                        content:
+                            '✅ Scrim setup created.',
+
+                        flags:
+                            MessageFlags.Ephemeral
+                    });
+                }
+
+                /* =================================================
+                   CREATE TRYOUT
+                ================================================= */
+
+                if (
+                    subcommand ===
+                    'create'
+                ) {
+                    if (
+                        !isTryoutHoster(
+                            interaction.member
+                        )
+                    ) {
+                        return interaction.reply({
                             content:
                                 '❌ You must be a **Tryout Hoster** to create a tryout.',
 
@@ -2690,19 +3951,18 @@ client.on(
                     }
 
                     const existing =
-                        [...tryouts.values()]
-                            .find(
-                                lobby =>
-                                    lobby.hostId ===
-                                    interaction.user.id
-                            );
+                        [
+                            ...tryouts.values()
+                        ].find(
+                            lobby =>
+                                lobby.hostId ===
+                                interaction.user.id
+                        );
 
                     if (
                         existing
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ You already have an active tryout lobby.',
 
@@ -2712,7 +3972,6 @@ client.on(
                     }
 
                     const lobby = {
-
                         hostId:
                             interaction.user.id,
 
@@ -2730,7 +3989,6 @@ client.on(
                     };
 
                     const payload = {
-
                         embeds: [
                             tryoutEmbed(
                                 lobby
@@ -2747,14 +4005,9 @@ client.on(
                         }
                     };
 
-                    /*
-                     * Auto ping the public Tryout Ping role.
-                     */
-
                     if (
                         TRYOUT_PING_ROLE_ID
                     ) {
-
                         payload.content =
                             `<@&${TRYOUT_PING_ROLE_ID}>`;
 
@@ -2782,7 +4035,6 @@ client.on(
                     updatePresence();
 
                     return interaction.reply({
-
                         content:
                             '✅ Your tryout lobby has been created.',
 
@@ -2791,23 +4043,20 @@ client.on(
                     });
                 }
 
-                /* =============================================
-                   CLOSE
-                ============================================= */
+                /* =================================================
+                   CLOSE TRYOUT COMMAND
+                ================================================= */
 
                 if (
                     subcommand ===
                     'close'
                 ) {
-
                     if (
                         !isTryoutHoster(
                             interaction.member
                         )
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ You must be a **Tryout Hoster** to close tryouts.',
 
@@ -2817,19 +4066,18 @@ client.on(
                     }
 
                     const found =
-                        [...tryouts.entries()]
-                            .find(
-                                ([, lobby]) =>
-                                    lobby.hostId ===
-                                    interaction.user.id
-                            );
+                        [
+                            ...tryouts.entries()
+                        ].find(
+                            ([, lobby]) =>
+                                lobby.hostId ===
+                                interaction.user.id
+                        );
 
                     if (
                         !found
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ You do not have an active tryout lobby.',
 
@@ -2839,7 +4087,6 @@ client.on(
                     }
 
                     await interaction.deferReply({
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -2847,7 +4094,8 @@ client.on(
                     const [
                         messageId,
                         lobby
-                    ] = found;
+                    ] =
+                        found;
 
                     tryouts.delete(
                         messageId
@@ -2862,91 +4110,72 @@ client.on(
 
                     const message =
                         channel
-
-                            ? await channel.messages
-                                .fetch(
-                                    messageId
-                                )
-                                .catch(
-                                    () => null
-                                )
-
+                            ? await channel.messages.fetch(
+                                messageId
+                            ).catch(
+                                () =>
+                                    null
+                            )
                             : null;
 
                     if (
                         message
                     ) {
-
                         await message.edit({
-
                             embeds: [
-
                                 new EmbedBuilder()
-
                                     .setColor(
                                         GOLD
                                     )
-
                                     .setAuthor({
                                         name:
                                             '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍'
                                     })
-
                                     .setTitle(
                                         'ᴛʀʏᴏᴜᴛ ʜᴜʙ'
                                     )
-
                                     .setDescription(
-
                                         '✦ **L O B B Y** ✦\n\n' +
-
                                         '🔒 **CLOSED**\n\n' +
-
                                         `Host: <@${lobby.hostId}>\n` +
-
                                         `Players: **${lobby.players.length}/${MAX_PLAYERS}**`
                                     )
-
                                     .setFooter({
                                         text:
                                             '✦ A U R E O N • E U ✦'
                                     })
-
                                     .setImage(
                                         BANNER_URL
                                     )
                             ],
 
-                            components: []
+                            components:
+                                []
                         }).catch(
                             () => {}
                         );
                     }
 
                     return interaction.editReply({
-
                         content:
                             '✅ Your tryout lobby has been closed.'
                     });
                 }
 
-                /* =============================================
+                /* =================================================
                    RESULTS
-                ============================================= */
+                ================================================= */
 
                 if (
                     subcommand ===
                     'results'
                 ) {
-
                     if (
                         !isTryoutHoster(
                             interaction.member
                         )
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ You must be a **Tryout Hoster** to create results.',
 
@@ -2957,32 +4186,25 @@ client.on(
 
                     const selector =
                         new UserSelectMenuBuilder()
-
                             .setCustomId(
                                 'result_player_select'
                             )
-
                             .setPlaceholder(
                                 'Select a player'
                             )
-
                             .setMinValues(
                                 1
                             )
-
                             .setMaxValues(
                                 1
                             );
 
                     return interaction.reply({
-
                         content:
                             '✦ **A U R E O N • PLAYER RESULTS** ✦\n\n' +
-
                             'Select the player you want to rate.',
 
                         components: [
-
                             new ActionRowBuilder()
                                 .addComponents(
                                     selector
@@ -2994,32 +4216,29 @@ client.on(
                     });
                 }
 
-                /* =============================================
+                /* =================================================
                    LEADERBOARD
-                ============================================= */
+                ================================================= */
 
                 if (
                     subcommand ===
                     'leaderboard'
                 ) {
-
                     return interaction.reply({
-
                         embeds: [
                             buildLeaderboardEmbed()
                         ]
                     });
                 }
 
-                /* =============================================
+                /* =================================================
                    PROFILE
-                ============================================= */
+                ================================================= */
 
                 if (
                     subcommand ===
                     'profile'
                 ) {
-
                     const user =
                         interaction.options.getUser(
                             'player',
@@ -3034,9 +4253,7 @@ client.on(
                     if (
                         !profile
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 `❌ <@${user.id}> does not have a completed AUREON tryout result yet.`,
 
@@ -3046,30 +4263,26 @@ client.on(
                     }
 
                     return interaction.reply({
-
                         embeds: [
                             profile
                         ]
                     });
                 }
 
-                /* =============================================
+                /* =================================================
                    ANNOUNCE
-                ============================================= */
+                ================================================= */
 
                 if (
                     subcommand ===
                     'announce'
                 ) {
-
                     if (
                         !isTryoutHoster(
                             interaction.member
                         )
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ You must be a **Tryout Hoster** to announce a tryout.',
 
@@ -3092,23 +4305,19 @@ client.on(
 
                     const duration =
                         unit ===
-                            'minutes'
-
+                        'minutes'
                             ? amount *
-                              60 *
-                              1000
-
+                            60 *
+                            1000
                             : amount *
-                              60 *
-                              60 *
-                              1000;
+                            60 *
+                            60 *
+                            1000;
 
                     pendingAnnouncements.set(
                         interaction.user.id,
                         {
-
                             unit,
-
                             amount,
 
                             channelId:
@@ -3127,14 +4336,13 @@ client.on(
                 }
             }
 
-            /* =================================================
+            /* =====================================================
                USER SELECT
-            ================================================= */
+            ===================================================== */
 
             if (
                 interaction.isUserSelectMenu()
             ) {
-
                 if (
                     interaction.customId !==
                     'result_player_select'
@@ -3147,9 +4355,7 @@ client.on(
                         interaction.member
                     )
                 ) {
-
                     return interaction.reply({
-
                         content:
                             '❌ You must be a **Tryout Hoster**.',
 
@@ -3167,15 +4373,14 @@ client.on(
                             playerId
                         )
                         .catch(
-                            () => null
+                            () =>
+                                null
                         );
 
                 if (
                     !player
                 ) {
-
                     return interaction.reply({
-
                         content:
                             '❌ Player not found.',
 
@@ -3192,7 +4397,6 @@ client.on(
                 drafts.set(
                     interaction.user.id,
                     {
-
                         playerId,
 
                         stats:
@@ -3208,23 +4412,102 @@ client.on(
                 );
             }
 
-            /* =================================================
+            /* =====================================================
                MODALS
-            ================================================= */
+            ===================================================== */
 
             if (
                 interaction.isModalSubmit()
             ) {
+                /* =================================================
+                   SCRIM SERVER LINK
+                ================================================= */
 
-                /* =============================================
+                if (
+                    interaction.customId.startsWith(
+                        'scrim_server_link_modal:'
+                    )
+                ) {
+                    const messageId =
+                        interaction.customId.split(
+                            ':'
+                        )[1];
+
+                    const scrim =
+                        getScrim(
+                            messageId
+                        );
+
+                    if (
+                        !scrim
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ This scrim is no longer active.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    if (
+                        interaction.user.id !==
+                        scrim.hostId
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ Only the scrim host can set the server link.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    const link =
+                        interaction.fields
+                            .getTextInputValue(
+                                'scrim_server_link'
+                            )
+                            ?.trim();
+
+                    if (
+                        !/^https:\/\//i.test(
+                            link
+                        )
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ Please use a valid HTTPS server link.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    scrim.serverLink =
+                        link;
+
+                    await updateScrimMessage(
+                        scrim
+                    );
+
+                    return interaction.reply({
+                        content:
+                            '✅ Server link saved.',
+
+                        flags:
+                            MessageFlags.Ephemeral
+                    });
+                }
+
+                /* =================================================
                    ANNOUNCEMENT MODAL
-                ============================================= */
+                ================================================= */
 
                 if (
                     interaction.customId ===
                     'tryout_announce_modal'
                 ) {
-
                     const pending =
                         pendingAnnouncements.get(
                             interaction.user.id
@@ -3233,9 +4516,7 @@ client.on(
                     if (
                         !pending
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ This announcement request expired. Please run the command again.',
 
@@ -3257,7 +4538,6 @@ client.on(
                         '';
 
                     const announcement = {
-
                         hostId:
                             interaction.user.id,
 
@@ -3305,11 +4585,8 @@ client.on(
                     };
 
                     const payload = {
-
                         embeds: [
-
                             announcementEmbed({
-
                                 ...announcement,
 
                                 messageId:
@@ -3318,9 +4595,7 @@ client.on(
                         ],
 
                         components:
-
                             announcementButtons({
-
                                 ...announcement,
 
                                 messageId:
@@ -3328,14 +4603,14 @@ client.on(
                             }),
 
                         allowedMentions: {
-                            parse: []
+                            parse:
+                                []
                         }
                     };
 
                     if (
                         TRYOUT_PING_ROLE_ID
                     ) {
-
                         payload.content =
                             `<@&${TRYOUT_PING_ROLE_ID}>`;
 
@@ -3363,9 +4638,7 @@ client.on(
                     );
 
                     await message.edit({
-
                         embeds: [
-
                             announcementEmbed(
                                 announcement
                             )
@@ -3380,18 +4653,16 @@ client.on(
                     return;
                 }
 
-                /* =============================================
+                /* =================================================
                    RESULT STATS
-                ============================================= */
+                ================================================= */
 
                 if (
                     interaction.customId.startsWith(
                         'result_stats:'
                     )
                 ) {
-
                     await interaction.deferReply({
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -3403,7 +4674,6 @@ client.on(
 
                     const getValue =
                         customId => {
-
                             const raw =
                                 interaction.fields
                                     .getTextInputValue(
@@ -3428,8 +4698,10 @@ client.on(
                                 !Number.isInteger(
                                     value
                                 ) ||
-                                value < 0 ||
-                                value > 100
+                                value <
+                                    0 ||
+                                value >
+                                    100
                             ) {
                                 return null;
                             }
@@ -3477,9 +4749,7 @@ client.on(
                                 null
                         )
                     ) {
-
                         return interaction.editReply({
-
                             content:
                                 '❌ All stats must be whole numbers from **0 to 100**.'
                         });
@@ -3494,7 +4764,6 @@ client.on(
                         );
 
                     const stats = {
-
                         shooting,
 
                         passing,
@@ -3516,7 +4785,6 @@ client.on(
                     drafts.set(
                         interaction.user.id,
                         {
-
                             playerId,
 
                             stats
@@ -3529,24 +4797,21 @@ client.on(
                                 playerId
                             )
                             .catch(
-                                () => null
+                                () =>
+                                    null
                             );
 
                     if (
                         !player
                     ) {
-
                         return interaction.editReply({
-
                             content:
                                 '❌ Player not found.'
                         });
                     }
 
                     return interaction.editReply({
-
                         embeds: [
-
                             resultEmbed(
                                 player.user,
                                 stats,
@@ -3561,15 +4826,14 @@ client.on(
                     });
                 }
 
-                /* =============================================
-                   SERVER LINK MODAL
-                ============================================= */
+                /* =================================================
+                   EXISTING TRYOUT SERVER LINK MODAL
+                ================================================= */
 
                 if (
                     interaction.customId ===
                     'server_link_modal'
                 ) {
-
                     const link =
                         interaction.fields
                             .getTextInputValue(
@@ -3582,9 +4846,7 @@ client.on(
                             link
                         )
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ Please use a valid HTTPS server link.',
 
@@ -3594,22 +4856,20 @@ client.on(
                     }
 
                     const found =
-                        [...tryouts.entries()]
-                            .find(
-                                ([, lobby]) =>
-                                    lobby.hostId ===
-                                        interaction.user.id &&
-
-                                    lobby.channelId ===
-                                        interaction.channelId
-                            );
+                        [
+                            ...tryouts.entries()
+                        ].find(
+                            ([, lobby]) =>
+                                lobby.hostId ===
+                                    interaction.user.id &&
+                                lobby.channelId ===
+                                    interaction.channelId
+                        );
 
                     if (
                         !found
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ Your tryout lobby could not be found.',
 
@@ -3621,7 +4881,8 @@ client.on(
                     const [
                         messageId,
                         lobby
-                    ] = found;
+                    ] =
+                        found;
 
                     lobby.serverLink =
                         link;
@@ -3632,15 +4893,14 @@ client.on(
                                 messageId
                             )
                             .catch(
-                                () => null
+                                () =>
+                                    null
                             );
 
                     if (
                         message
                     ) {
-
                         await message.edit({
-
                             embeds: [
                                 tryoutEmbed(
                                     lobby
@@ -3655,7 +4915,6 @@ client.on(
                     }
 
                     return interaction.reply({
-
                         content:
                             '✅ Server link saved. It will only appear publicly at **10/10**.',
 
@@ -3665,37 +4924,589 @@ client.on(
                 }
             }
 
-            /* =================================================
+            /* =====================================================
                BUTTONS
-            ================================================= */
+            ===================================================== */
 
             if (
                 interaction.isButton()
             ) {
+                /* =================================================
+                   SCRIM TYPE SELECT
+                ================================================= */
 
-                /* =============================================
+                if (
+                    interaction.customId ===
+                        'scrim_type:friendly' ||
+                    interaction.customId ===
+                        'scrim_type:elo'
+                ) {
+                    const selectedType =
+                        interaction.customId.split(
+                            ':'
+                        )[1];
+
+                    const scrim =
+                        getScrim(
+                            interaction.message.id
+                        );
+
+                    if (
+                        !scrim
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ This scrim is no longer active.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    if (
+                        interaction.user.id !==
+                        scrim.hostId
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ Only the scrim host can choose the scrim type.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    if (
+                        scrim.phase !==
+                        'choose'
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ The scrim type has already been selected.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    if (
+                        selectedType ===
+                            'elo' &&
+                        !MAIN_TEAM_ROLE_ID
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ ELO scrims are not configured yet. Add **MAIN_TEAM_ROLE_ID** in your .env.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    const oldType =
+                        scrim.type;
+
+                    const oldPhase =
+                        scrim.phase;
+
+                    scrim.type =
+                        selectedType;
+
+                    scrim.phase =
+                        'queue';
+
+                    try {
+                        await interaction.message.edit({
+                            embeds: [
+                                scrimPositionEmbed(
+                                    scrim
+                                )
+                            ],
+
+                            components:
+                                scrimPositionButtons(
+                                    scrim
+                                )
+                        });
+                    } catch (
+                        error
+                    ) {
+                        scrim.type =
+                            oldType;
+
+                        scrim.phase =
+                            oldPhase;
+
+                        console.error(
+                            '❌ Scrim type GUI update failed:',
+                            error
+                        );
+
+                        return interaction.reply({
+                            content:
+                                '❌ Could not update the scrim GUI. Please try again.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    await pingScrimRole(
+                        scrim
+                    );
+
+                    return interaction.reply({
+                        content:
+                            selectedType ===
+                                'elo'
+                                ? '🔴 **ELO SCRIM** opened. Main Team players can choose a position.'
+                                : '🟢 **FRIENDLY SCRIM** opened. Everyone can choose a position.',
+
+                        flags:
+                            MessageFlags.Ephemeral
+                    });
+                }
+
+                /* =================================================
+                   SCRIM POSITION
+                ================================================= */
+
+                if (
+                    interaction.customId.startsWith(
+                        'scrim_pos:'
+                    )
+                ) {
+                    const [
+                        ,
+                        position,
+                        messageId
+                    ] =
+                        interaction.customId.split(
+                            ':'
+                        );
+
+                    const scrim =
+                        getScrim(
+                            messageId
+                        );
+
+                    if (
+                        !scrim
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ This scrim is no longer active.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    if (
+                        scrim.phase !==
+                        'queue'
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ This scrim is no longer accepting players.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    const member =
+                        await interaction.guild.members
+                            .fetch(
+                                interaction.user.id
+                            )
+                            .catch(
+                                () =>
+                                    null
+                            );
+
+                    if (
+                        !member
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ Could not find your server member data.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    if (
+                        scrim.type ===
+                            'elo' &&
+                        !isMainTeam(
+                            member
+                        )
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '🔴 **ELO SCRIM:** You need the **Main Team** role to join.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    const existing =
+                        scrim.players.find(
+                            player =>
+                                player.id ===
+                                interaction.user.id
+                        );
+
+                    const displayName =
+                        interaction.member
+                            ?.displayName ||
+                        interaction.user
+                            .globalName ||
+                        interaction.user
+                            .username;
+
+                    if (
+                        existing
+                    ) {
+                        existing.position =
+                            position;
+
+                        existing.displayName =
+                            displayName;
+                    } else {
+                        scrim.players.push({
+                            id:
+                                interaction.user.id,
+
+                            position,
+
+                            displayName
+                        });
+                    }
+
+                    if (
+                        !allPositionsCovered(
+                            scrim
+                        )
+                    ) {
+                        scrim.countdownEndTime =
+                            null;
+                    }
+
+                    await interaction.deferReply({
+                        flags:
+                            MessageFlags.Ephemeral
+                    });
+
+                    await interaction.message.edit({
+                        embeds: [
+                            scrimPositionEmbed(
+                                scrim
+                            )
+                        ],
+
+                        components:
+                            scrimPositionButtons(
+                                scrim
+                            )
+                    });
+
+                    await startScrimCountdownIfReady(
+                        scrim
+                    );
+
+                    return interaction.editReply({
+                        content:
+                            `✅ You are now **${position}**.\n` +
+                            `👥 Queue: **${scrim.players.length} / ∞**` +
+                            (
+                                allPositionsCovered(
+                                    scrim
+                                )
+                                    ? '\n⏱️ All positions are covered — the 2-minute timer is running.'
+                                    : ''
+                            )
+                    });
+                }
+
+                /* =================================================
+                   SCRIM LEAVE
+                ================================================= */
+
+                if (
+                    interaction.customId.startsWith(
+                        'scrim_leave:'
+                    )
+                ) {
+                    const messageId =
+                        interaction.customId.split(
+                            ':'
+                        )[1];
+
+                    const scrim =
+                        getScrim(
+                            messageId
+                        );
+
+                    if (
+                        !scrim
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ This scrim is no longer active.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    if (
+                        scrim.phase !==
+                        'queue'
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ You cannot leave after the random pick has started.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    const index =
+                        scrim.players.findIndex(
+                            player =>
+                                player.id ===
+                                interaction.user.id
+                        );
+
+                    if (
+                        index ===
+                        -1
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '⚠️ You are not currently in this scrim.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    scrim.players.splice(
+                        index,
+                        1
+                    );
+
+                    if (
+                        !allPositionsCovered(
+                            scrim
+                        )
+                    ) {
+                        scrim.countdownEndTime =
+                            null;
+                    }
+
+                    await interaction.message.edit({
+                        embeds: [
+                            scrimPositionEmbed(
+                                scrim
+                            )
+                        ],
+
+                        components:
+                            scrimPositionButtons(
+                                scrim
+                            )
+                    });
+
+                    return interaction.reply({
+                        content:
+                            '↩️ You left the scrim queue.',
+
+                        flags:
+                            MessageFlags.Ephemeral
+                    });
+                }
+
+                /* =================================================
+                   SCRIM SERVER LINK
+                ================================================= */
+
+                if (
+                    interaction.customId.startsWith(
+                        'scrim_link:'
+                    )
+                ) {
+                    const messageId =
+                        interaction.customId.split(
+                            ':'
+                        )[1];
+
+                    const scrim =
+                        getScrim(
+                            messageId
+                        );
+
+                    if (
+                        !scrim
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ This scrim is no longer active.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    if (
+                        interaction.user.id !==
+                        scrim.hostId
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ Only the scrim host can set the server link.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    const modal =
+                        new ModalBuilder()
+                            .setCustomId(
+                                `scrim_server_link_modal:${scrim.messageId}`
+                            )
+                            .setTitle(
+                                'AUREON • SCRIM SERVER LINK'
+                            )
+                            .addComponents(
+                                new ActionRowBuilder()
+                                    .addComponents(
+                                        new TextInputBuilder()
+                                            .setCustomId(
+                                                'scrim_server_link'
+                                            )
+                                            .setLabel(
+                                                'Roblox Private Server Link'
+                                            )
+                                            .setPlaceholder(
+                                                'Paste your Roblox private server link'
+                                            )
+                                            .setStyle(
+                                                TextInputStyle.Short
+                                            )
+                                            .setRequired(
+                                                true
+                                            )
+                                            .setValue(
+                                                scrim.serverLink ||
+                                                ''
+                                            )
+                                            .setMaxLength(
+                                                1000
+                                            )
+                                    )
+                            );
+
+                    return interaction.showModal(
+                        modal
+                    );
+                }
+
+                /* =================================================
+                   SCRIM CLOSE
+                ================================================= */
+
+                if (
+                    interaction.customId.startsWith(
+                        'scrim_close:'
+                    )
+                ) {
+                    const messageId =
+                        interaction.customId.split(
+                            ':'
+                        )[1];
+
+                    const scrim =
+                        getScrim(
+                            messageId
+                        );
+
+                    if (
+                        !scrim
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ This scrim is already closed.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    if (
+                        interaction.user.id !==
+                        scrim.hostId
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ Only the scrim host can close this scrim.',
+
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
+
+                    /*
+                     * Delete from Map FIRST.
+                     * This lets the host create another scrim
+                     * immediately after closing this one.
+                     */
+                    scrims.delete(
+                        scrim.messageId
+                    );
+
+                    await interaction.message
+                        .delete()
+                        .catch(
+                            () => {}
+                        );
+
+                    return interaction.reply({
+                        content:
+                            '❌ Scrim closed.',
+
+                        flags:
+                            MessageFlags.Ephemeral
+                    });
+                }
+
+                /* =================================================
                    TRYOUT JOIN
-                ============================================= */
+                ================================================= */
 
                 if (
                     interaction.customId ===
                     'tryout_join'
                 ) {
-
                     const lobby =
-                        [...tryouts.values()]
-                            .find(
-                                item =>
-                                    item.messageId ===
-                                    interaction.message.id
-                            );
+                        [
+                            ...tryouts.values()
+                        ].find(
+                            item =>
+                                item.messageId ===
+                                interaction.message.id
+                        );
 
                     if (
                         !lobby
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ This tryout is no longer active.',
 
@@ -3705,7 +5516,6 @@ client.on(
                     }
 
                     await interaction.deferReply({
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -3715,9 +5525,7 @@ client.on(
                             interaction.user.id
                         )
                     ) {
-
                         return interaction.editReply({
-
                             content:
                                 '⚠️ You are already in this tryout.'
                         });
@@ -3727,9 +5535,7 @@ client.on(
                         lobby.players.length >=
                         MAX_PLAYERS
                     ) {
-
                         return interaction.editReply({
-
                             content:
                                 '❌ This tryout is already **10/10**.'
                         });
@@ -3740,7 +5546,6 @@ client.on(
                     );
 
                     await interaction.message.edit({
-
                         embeds: [
                             tryoutEmbed(
                                 lobby
@@ -3756,35 +5561,32 @@ client.on(
                     updatePresence();
 
                     return interaction.editReply({
-
                         content:
                             `✅ You joined the tryout. **${lobby.players.length}/${MAX_PLAYERS}**`
                     });
                 }
 
-                /* =============================================
+                /* =================================================
                    TRYOUT LEAVE
-                ============================================= */
+                ================================================= */
 
                 if (
                     interaction.customId ===
                     'tryout_leave'
                 ) {
-
                     const lobby =
-                        [...tryouts.values()]
-                            .find(
-                                item =>
-                                    item.messageId ===
-                                    interaction.message.id
-                            );
+                        [
+                            ...tryouts.values()
+                        ].find(
+                            item =>
+                                item.messageId ===
+                                interaction.message.id
+                        );
 
                     if (
                         !lobby
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ This tryout is no longer active.',
 
@@ -3794,7 +5596,6 @@ client.on(
                     }
 
                     await interaction.deferReply({
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -3803,9 +5604,7 @@ client.on(
                         interaction.user.id ===
                         lobby.hostId
                     ) {
-
                         return interaction.editReply({
-
                             content:
                                 '❌ The host cannot leave their own lobby. Close the lobby instead.'
                         });
@@ -3820,9 +5619,7 @@ client.on(
                         index ===
                         -1
                     ) {
-
                         return interaction.editReply({
-
                             content:
                                 '⚠️ You are not in this tryout.'
                         });
@@ -3834,7 +5631,6 @@ client.on(
                     );
 
                     await interaction.message.edit({
-
                         embeds: [
                             tryoutEmbed(
                                 lobby
@@ -3850,35 +5646,32 @@ client.on(
                     updatePresence();
 
                     return interaction.editReply({
-
                         content:
                             `↩️ You left the tryout. **${lobby.players.length}/${MAX_PLAYERS}**`
                     });
                 }
 
-                /* =============================================
-                   SERVER LINK BUTTON
-                ============================================= */
+                /* =================================================
+                   TRYOUT SERVER LINK
+                ================================================= */
 
                 if (
                     interaction.customId ===
                     'tryout_link'
                 ) {
-
                     const lobby =
-                        [...tryouts.values()]
-                            .find(
-                                item =>
-                                    item.messageId ===
-                                    interaction.message.id
-                            );
+                        [
+                            ...tryouts.values()
+                        ].find(
+                            item =>
+                                item.messageId ===
+                                interaction.message.id
+                        );
 
                     if (
                         !lobby
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ This tryout is no longer active.',
 
@@ -3891,9 +5684,7 @@ client.on(
                         interaction.user.id !==
                         lobby.hostId
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ Only the host can set the server link.',
 
@@ -3904,20 +5695,15 @@ client.on(
 
                     const modal =
                         new ModalBuilder()
-
                             .setCustomId(
                                 'server_link_modal'
                             )
-
                             .setTitle(
                                 'AUREON • SERVER LINK'
                             )
-
                             .addComponents(
-
                                 new ActionRowBuilder()
                                     .addComponents(
-
                                         new TextInputBuilder()
                                             .setCustomId(
                                                 'server_link'
@@ -3949,29 +5735,27 @@ client.on(
                     );
                 }
 
-                /* =============================================
-                   CLOSE TRYOUT BUTTON
-                ============================================= */
+                /* =================================================
+                   TRYOUT CLOSE BUTTON
+                ================================================= */
 
                 if (
                     interaction.customId ===
                     'tryout_close'
                 ) {
-
                     const lobby =
-                        [...tryouts.values()]
-                            .find(
-                                item =>
-                                    item.messageId ===
-                                    interaction.message.id
-                            );
+                        [
+                            ...tryouts.values()
+                        ].find(
+                            item =>
+                                item.messageId ===
+                                interaction.message.id
+                        );
 
                     if (
                         !lobby
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ This tryout is already closed.',
 
@@ -3984,9 +5768,7 @@ client.on(
                         interaction.user.id !==
                         lobby.hostId
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ Only the host can close this tryout.',
 
@@ -4008,7 +5790,6 @@ client.on(
                         );
 
                     return interaction.reply({
-
                         content:
                             '❌ Tryout closed.',
 
@@ -4017,16 +5798,15 @@ client.on(
                     });
                 }
 
-                /* =============================================
+                /* =================================================
                    ANNOUNCEMENT READY
-                ============================================= */
+                ================================================= */
 
                 if (
                     interaction.customId.startsWith(
                         'announcement_ready:'
                     )
                 ) {
-
                     const messageId =
                         interaction.customId.split(
                             ':'
@@ -4041,9 +5821,7 @@ client.on(
                         !a ||
                         a.closed
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ This announcement is no longer active.',
 
@@ -4057,9 +5835,7 @@ client.on(
                             interaction.user.id
                         )
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '⚠️ You are already **READY**.',
 
@@ -4072,9 +5848,7 @@ client.on(
                         a.ready.length >=
                         MAX_PLAYERS
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ The ready list is already full.',
 
@@ -4092,7 +5866,6 @@ client.on(
                     );
 
                     await interaction.reply({
-
                         content:
                             '⚡ You are marked **READY**.',
 
@@ -4104,7 +5877,6 @@ client.on(
                         a.ready.length >=
                         MAX_PLAYERS
                     ) {
-
                         await finishAnnouncement(
                             a,
                             'full'
@@ -4118,16 +5890,15 @@ client.on(
                     return;
                 }
 
-                /* =============================================
+                /* =================================================
                    ANNOUNCEMENT NOT READY
-                ============================================= */
+                ================================================= */
 
                 if (
                     interaction.customId.startsWith(
                         'announcement_notready:'
                     )
                 ) {
-
                     const messageId =
                         interaction.customId.split(
                             ':'
@@ -4142,9 +5913,7 @@ client.on(
                         !a ||
                         a.closed
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ This announcement is no longer active.',
 
@@ -4162,9 +5931,7 @@ client.on(
                         index ===
                         -1
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '⚠️ You are not currently READY.',
 
@@ -4183,7 +5950,6 @@ client.on(
                     );
 
                     return interaction.reply({
-
                         content:
                             '↩️ You are no longer marked **READY**.',
 
@@ -4192,16 +5958,15 @@ client.on(
                     });
                 }
 
-                /* =============================================
+                /* =================================================
                    ANNOUNCEMENT RE-PING
-                ============================================= */
+                ================================================= */
 
                 if (
                     interaction.customId.startsWith(
                         'announcement_reping:'
                     )
                 ) {
-
                     const messageId =
                         interaction.customId.split(
                             ':'
@@ -4216,9 +5981,7 @@ client.on(
                         !a ||
                         a.closed
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ This announcement is no longer active.',
 
@@ -4231,9 +5994,7 @@ client.on(
                         interaction.user.id !==
                         a.hostId
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ Only the host can RE-PING.',
 
@@ -4245,9 +6006,7 @@ client.on(
                     if (
                         a.repingUsed
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '⚠️ RE-PING has already been used.',
 
@@ -4269,13 +6028,9 @@ client.on(
                     );
 
                     return interaction.reply({
-
                         content:
-
                             '✅ **RE-PING sent in the public channel.**\n\n' +
-
                             `⚡ Ready: **${a.ready.length}/${MAX_PLAYERS}**\n\n` +
-
                             'When the timer reaches 0, the lobby receives a **2-minute extension**.',
 
                         flags:
@@ -4283,24 +6038,21 @@ client.on(
                     });
                 }
 
-                /* =============================================
+                /* =================================================
                    RESULT EDIT
-                ============================================= */
+                ================================================= */
 
                 if (
                     interaction.customId.startsWith(
                         'result_edit:'
                     )
                 ) {
-
                     if (
                         !isTryoutHoster(
                             interaction.member
                         )
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ You must be a **Tryout Hoster**.',
 
@@ -4320,13 +6072,9 @@ client.on(
                         );
 
                     return interaction.showModal(
-
                         resultModal(
-
                             playerId,
-
                             draft?.stats ||
-
                             getStoredPlayerData(
                                 playerId
                             )
@@ -4334,24 +6082,21 @@ client.on(
                     );
                 }
 
-                /* =============================================
+                /* =================================================
                    RESULT FINISH
-                ============================================= */
+                ================================================= */
 
                 if (
                     interaction.customId.startsWith(
                         'result_finish:'
                     )
                 ) {
-
                     if (
                         !isTryoutHoster(
                             interaction.member
                         )
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ You must be a **Tryout Hoster** to finish results.',
 
@@ -4373,9 +6118,7 @@ client.on(
                     if (
                         !draft?.stats
                     ) {
-
                         return interaction.reply({
-
                             content:
                                 '❌ No result draft was found. Enter the stats again.',
 
@@ -4400,15 +6143,12 @@ client.on(
                         Array.isArray(
                             oldData?.history
                         )
-
                             ? [
                                 ...oldData.history
                             ]
-
                             : [];
 
                     history.push({
-
                         shooting:
                             stats.shooting,
 
@@ -4432,8 +6172,7 @@ client.on(
                             '',
 
                         completedAt:
-                            new Date()
-                                .toISOString()
+                            new Date().toISOString()
                     });
 
                     const bestOVR =
@@ -4447,7 +6186,6 @@ client.on(
                         );
 
                     const updatedData = {
-
                         shooting:
                             stats.shooting,
 
@@ -4471,8 +6209,7 @@ client.on(
                             '',
 
                         updatedAt:
-                            new Date()
-                                .toISOString(),
+                            new Date().toISOString(),
 
                         history,
 
@@ -4491,11 +6228,8 @@ client.on(
 
                     const assignment =
                         await assignRankRole(
-
                             interaction,
-
                             playerId,
-
                             stats.rank
                         );
 
@@ -4505,32 +6239,26 @@ client.on(
                                 playerId
                             )
                             .catch(
-                                () => null
+                                () =>
+                                    null
                             );
 
                     if (
                         player
                     ) {
-
                         await interaction.channel.send({
-
                             content:
                                 `<@${playerId}>`,
 
                             embeds: [
-
                                 resultEmbed(
-
                                     player.user,
-
                                     stats,
-
                                     false
                                 )
                             ],
 
                             allowedMentions: {
-
                                 users: [
                                     playerId
                                 ]
@@ -4544,36 +6272,30 @@ client.on(
 
                     const roleText =
                         assignment.ok
-
                             ? `\n🏷️ Rank role: **${assignment.roleName}**`
-
                             : `\n⚠️ Rank role was not assigned: ${assignment.reason}`;
 
                     return interaction.editReply({
-
                         content:
-
                             `✅ **Result finished for <@${playerId}>**\n\n` +
-
                             `◇ OVR: **${stats.overall}**\n` +
-
                             `◇ Rank: **${stats.rank}**\n` +
-
                             `◇ TRYOUTS: **${updatedData.tryoutsCompleted}**\n` +
-
                             `◇ BEST OVR: **${updatedData.bestOVR}**` +
-
                             roleText,
 
-                        embeds: [],
+                        embeds:
+                            [],
 
-                        components: []
+                        components:
+                            []
                     });
                 }
             }
-
-        } catch (error) {
-
+        }
+         catch (
+            error
+        ) {
             console.error(
                 '❌ Interaction error:',
                 error
@@ -4584,9 +6306,7 @@ client.on(
                 !interaction.replied &&
                 !interaction.deferred
             ) {
-
                 await interaction.reply({
-
                     content:
                         '❌ Something went wrong. Check the bot console for the error.',
 
@@ -4595,15 +6315,12 @@ client.on(
                 }).catch(
                     () => {}
                 );
-
             } else if (
                 interaction.isRepliable() &&
                 interaction.deferred &&
                 !interaction.replied
             ) {
-
                 await interaction.editReply({
-
                     content:
                         '❌ Something went wrong. Check the bot console for the error.'
                 }).catch(
@@ -4621,7 +6338,6 @@ client.on(
 client.on(
     'messageDelete',
     message => {
-
         if (
             !message?.id
         ) {
@@ -4633,7 +6349,6 @@ client.on(
                 message.id
             )
         ) {
-
             tryouts.delete(
                 message.id
             );
@@ -4646,8 +6361,17 @@ client.on(
                 message.id
             )
         ) {
-
             announcements.delete(
+                message.id
+            );
+        }
+
+        if (
+            scrims.has(
+                message.id
+            )
+        ) {
+            scrims.delete(
                 message.id
             );
         }
@@ -4660,19 +6384,7 @@ client.on(
 
 normalizeDatabase();
 
-console.log(
-    '🚀 Starting AUREON bot...'
-);
-
-console.log(
-    `🖼️ Using banner: ${
-        /^https?:\/\/\S+$/i.test(
-            BANNER_URL
-        )
-            ? 'VALID'
-            : 'INVALID'
-    }`
-);
+console.log('🚀 Starting AUREON bot...');
 
 console.log(
     `⚡ Hoster role ID: ${
@@ -4690,55 +6402,80 @@ console.log(
     }`
 );
 
-client.login(
-    TOKEN
+console.log(
+    `👑 Main Team role ID: ${
+        MAIN_TEAM_ROLE_ID
+            ? 'VALID'
+            : 'MISSING / INVALID'
+    }`
+);
+
+console.log(
+    `🟢 Friendly Scrim Ping: ${
+        FRIENDLY_SCRIM_PING_ROLE_ID
+            ? 'VALID'
+            : 'MISSING / INVALID'
+    }`
+);
+
+/* =========================================================
+   DISCORD LOGIN
+========================================================= */
+
+const LOGIN_TOKEN = String(
+    process.env.TOKEN ||
+    process.env.DISCORD_TOKEN ||
+    TOKEN ||
+    ''
 )
-    .then(() => {
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/^Bot\s+/i, '');
+
+if (!LOGIN_TOKEN) {
+    console.error('');
+    console.error('======================================');
+    console.error('❌ DISCORD TOKEN IS MISSING');
+    console.error('======================================');
+    console.error(
+        'Railway Environment Variables must contain TOKEN.'
+    );
+    process.exit(1);
+}
+
+/* =========================================================
+   START BOT
+========================================================= */
+
+(async () => {
+    try {
+        console.log('🔐 Attempting Discord login...');
+
+        await client.login(LOGIN_TOKEN);
 
         console.log(
-            '✅ Discord login request accepted.'
+            '✅ Discord login successful.'
         );
 
-    })
-    .catch(
-        error => {
+    } catch (error) {
+        console.error('');
+        console.error('======================================');
+        console.error('❌ DISCORD LOGIN FAILED');
+        console.error('======================================');
+        console.error(
+            `Error code: ${error?.code ?? 'UNKNOWN'}`
+        );
+        console.error(
+            `Error name: ${error?.name ?? 'UNKNOWN'}`
+        );
+        console.error(
+            `Error message: ${error?.message ?? 'UNKNOWN'}`
+        );
+        console.error(
+            'The token itself was NOT printed.'
+        );
+        console.error('');
 
-            console.error('');
-
-            console.error(
-                '======================================'
-            );
-
-            console.error(
-                '❌ DISCORD LOGIN FAILED'
-            );
-
-            console.error(
-                '======================================'
-            );
-
-            console.error(
-                `Error code: ${
-                    error?.code ||
-                    'UNKNOWN'
-                }`
-            );
-
-            console.error(
-                `Error name: ${
-                    error?.name ||
-                    'UNKNOWN'
-                }`
-            );
-
-            console.error(
-                'The token itself was NOT printed.'
-            );
-
-            console.error('');
-
-            process.exit(
-                1
-            );
-        }
-    );
+        process.exit(1);
+    }
+})();
