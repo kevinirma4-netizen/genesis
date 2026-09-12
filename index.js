@@ -44,17 +44,32 @@ const RED = 0xB84949;
    BANNER
 ========================================================= */
 
+/*
+ * This is your original banner.
+ * It is used automatically when Railway BANNER_URL
+ * is missing or contains something that is NOT a URL.
+ */
+
 const DEFAULT_BANNER_URL =
     'https://cdn.discordapp.com/attachments/1546557355313856603/1548019473561423963/bannrerrer.jpg?ex=6aa588fb&is=6aa4377b&hm=762cdee4242861c771a2b3750408fc0ba7b098d33fbefea17760cda296ea23d4';
 
+const configuredBanner =
+    typeof process.env.BANNER_URL === 'string'
+        ? process.env.BANNER_URL.trim()
+        : '';
+
 /*
- * Railway BANNER_URL can override the default.
- * If BANNER_URL is missing, the default banner above is used.
+ * IMPORTANT:
+ * If Railway accidentally gives us a role ID such as
+ * 1546580353148395590, it will NOT be used as a banner.
  */
 
 const BANNER_URL =
-    process.env.BANNER_URL?.trim() ||
-    DEFAULT_BANNER_URL;
+    /^https?:\/\/\S+$/i.test(
+        configuredBanner
+    )
+        ? configuredBanner
+        : DEFAULT_BANNER_URL;
 
 /* =========================================================
    TOKEN
@@ -90,34 +105,61 @@ if (!TOKEN) {
    ROLE CONFIG
 ========================================================= */
 
+function cleanRoleId(value) {
+    if (
+        typeof value !== 'string'
+    ) {
+        return '';
+    }
+
+    const id =
+        value.trim();
+
+    /*
+     * Discord snowflake IDs are numeric.
+     * This prevents random text/URLs from being treated as IDs.
+     */
+
+    return /^\d{17,20}$/.test(id)
+        ? id
+        : '';
+}
+
 const TRYOUT_HOSTER_ROLE_ID =
-    process.env.TRYOUT_HOSTER_ROLE_ID?.trim() ||
-    '';
+    cleanRoleId(
+        process.env.TRYOUT_HOSTER_ROLE_ID
+    );
 
 const TRYOUT_PING_ROLE_ID =
-    process.env.TRYOUT_PING_ROLE_ID?.trim() ||
-    '';
+    cleanRoleId(
+        process.env.TRYOUT_PING_ROLE_ID
+    );
 
 const RANK_ROLE_IDS = {
     F:
-        process.env.AURE_RANK_F_ROLE_ID?.trim() ||
-        '',
+        cleanRoleId(
+            process.env.AURE_RANK_F_ROLE_ID
+        ),
 
     C:
-        process.env.AURE_RANK_C_ROLE_ID?.trim() ||
-        '',
+        cleanRoleId(
+            process.env.AURE_RANK_C_ROLE_ID
+        ),
 
     B:
-        process.env.AURE_RANK_B_ROLE_ID?.trim() ||
-        '',
+        cleanRoleId(
+            process.env.AURE_RANK_B_ROLE_ID
+        ),
 
     A:
-        process.env.AURE_RANK_A_ROLE_ID?.trim() ||
-        '',
+        cleanRoleId(
+            process.env.AURE_RANK_A_ROLE_ID
+        ),
 
     S:
-        process.env.AURE_RANK_S_ROLE_ID?.trim() ||
-        ''
+        cleanRoleId(
+            process.env.AURE_RANK_S_ROLE_ID
+        )
 };
 
 /* =========================================================
@@ -802,8 +844,15 @@ function tryoutEmbed(
                     '✦ A U R E O N • E U ✦'
             });
 
+    /*
+     * Always use a validated URL.
+     * This can no longer throw because of a role ID.
+     */
+
     if (
-        BANNER_URL
+        /^https?:\/\/\S+$/i.test(
+            BANNER_URL
+        )
     ) {
         embed.setImage(
             BANNER_URL
@@ -1038,34 +1087,32 @@ function resultModal(
             required = true
         ) => {
 
-            const builder =
-                new TextInputBuilder()
-                    .setCustomId(
-                        id
-                    )
-                    .setLabel(
-                        label
-                    )
-                    .setStyle(
-                        style
-                    )
-                    .setRequired(
-                        required
-                    )
-                    .setMaxLength(
-                        id ===
-                            'thingsToFix'
-                            ? 1000
-                            : 3
-                    )
-                    .setValue(
-                        value
-                    );
-
-            return builder;
+            return new TextInputBuilder()
+                .setCustomId(
+                    id
+                )
+                .setLabel(
+                    label
+                )
+                .setStyle(
+                    style
+                )
+                .setRequired(
+                    required
+                )
+                .setMaxLength(
+                    id ===
+                        'thingsToFix'
+                        ? 1000
+                        : 3
+                )
+                .setValue(
+                    value
+                );
         };
 
     modal.addComponents(
+
         new ActionRowBuilder()
             .addComponents(
                 makeInput(
@@ -1203,7 +1250,7 @@ function getLeaderboardEntries() {
                 if (
                     !data ||
                     data.tryoutsCompleted <
-                        1
+                    1
                 ) {
                     return null;
                 }
@@ -1278,12 +1325,14 @@ function getLeaderboardEntries() {
 }
 
 function buildLeaderboardEmbed() {
+
     const entries =
         getLeaderboardEntries();
 
     if (
         entries.length === 0
     ) {
+
         return new EmbedBuilder()
 
             .setColor(
@@ -1353,6 +1402,7 @@ function buildLeaderboardEmbed() {
                 if (
                     index === 3
                 ) {
+
                     description +=
                         '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
                 }
@@ -1408,7 +1458,7 @@ function buildProfileEmbed(
     if (
         !data ||
         data.tryoutsCompleted <
-            1
+        1
     ) {
         return null;
     }
@@ -1535,6 +1585,7 @@ function buildProfileEmbed(
 ========================================================= */
 
 function announcementModal() {
+
     return new ModalBuilder()
 
         .setCustomId(
@@ -1580,6 +1631,7 @@ function announcementModal() {
 function announcementPlayerList(
     a
 ) {
+
     if (
         a.ready.length ===
         0
@@ -1588,6 +1640,7 @@ function announcementPlayerList(
     }
 
     return a.ready
+
         .map(
             (
                 id,
@@ -1600,6 +1653,7 @@ function announcementPlayerList(
                     '0'
                 )}.** <@${id}>`
         )
+
         .join(
             '\n'
         );
@@ -1612,6 +1666,7 @@ function announcementPlayerList(
 function announcementProgress(
     a
 ) {
+
     const count =
         Math.min(
             MAX_PLAYERS,
@@ -1622,6 +1677,7 @@ function announcementProgress(
         '▰'.repeat(
             count
         ) +
+
         '▱'.repeat(
             MAX_PLAYERS -
             count
@@ -1636,13 +1692,16 @@ function announcementProgress(
 function announcementEmbed(
     a
 ) {
+
     const remaining =
         a.phase ===
             'extension'
+
             ? timeLeft(
                 a.extensionEndTime -
                 Date.now()
             )
+
             : timeLeft(
                 a.endTime -
                 Date.now()
@@ -1655,13 +1714,14 @@ function announcementEmbed(
         a.phase ===
         'extension'
     ) {
+
         title =
             '✦ ⚠️ ᴇxᴛᴇɴsɪᴏɴ';
-    }
 
-    else if (
+    } else if (
         a.warningSent
     ) {
+
         title =
             '✦ ⚠️ ᴄʟᴏsɪɴɢ sᴏᴏɴ';
     }
@@ -1690,6 +1750,7 @@ function announcementEmbed(
     if (
         a.customMessage
     ) {
+
         description +=
             `\n\n💬 **MESSAGE**\n${a.customMessage}`;
     }
@@ -1714,6 +1775,7 @@ function announcementEmbed(
         )
 
         .addFields(
+
             {
                 name:
                     'TIME',
@@ -1762,6 +1824,7 @@ function announcementEmbed(
 function announcementButtons(
     a
 ) {
+
     const row = [
 
         new ButtonBuilder()
@@ -1799,8 +1862,10 @@ function announcementButtons(
 
     if (
         a.warningSent ||
-        a.phase === 'extension'
+        a.phase ===
+        'extension'
     ) {
+
         row.push(
 
             new ButtonBuilder()
@@ -1834,7 +1899,9 @@ function announcementButtons(
 async function updateAnnouncement(
     a
 ) {
+
     try {
+
         const channel =
             await client.channels.fetch(
                 a.channelId
@@ -1854,6 +1921,7 @@ async function updateAnnouncement(
         }
 
         await message.edit({
+
             embeds: [
                 announcementEmbed(a)
             ],
@@ -1863,6 +1931,7 @@ async function updateAnnouncement(
         });
 
     } catch (error) {
+
         console.log(
             'Announcement update error:',
             error.message
@@ -1877,7 +1946,9 @@ async function updateAnnouncement(
 async function sendHostReminderDM(
     a
 ) {
+
     try {
+
         const user =
             await client.users.fetch(
                 a.hostId
@@ -1944,6 +2015,7 @@ async function sendHostReminderDM(
         });
 
     } catch (error) {
+
         console.log(
             'Host DM error:',
             error.message
@@ -1959,7 +2031,9 @@ async function pingTryoutRole(
     a,
     extension = false
 ) {
+
     try {
+
         const channel =
             await client.channels.fetch(
                 a.channelId
@@ -1977,10 +2051,12 @@ async function pingTryoutRole(
         if (
             !TRYOUT_PING_ROLE_ID
         ) {
+
             await channel.send({
 
                 content:
                     `✦ **AUREON TRYOUT ${state}**\n` +
+
                     `**${a.ready.length}/${MAX_PLAYERS}** players are ready.`,
 
                 allowedMentions: {
@@ -2008,6 +2084,7 @@ async function pingTryoutRole(
         });
 
     } catch (error) {
+
         console.log(
             'Ping error:',
             error.message
@@ -2023,6 +2100,7 @@ async function finishAnnouncement(
     a,
     reason
 ) {
+
     if (
         a.closed
     ) {
@@ -2081,11 +2159,15 @@ async function finishAnnouncement(
                 )
 
                 .setDescription(
+
                     isFull
+
                         ? '**10/10 players are ready.**\n\n' +
+
                           'The tryout is ready to begin.'
 
                         : 'The tryout did not reach **10/10** players.\n\n' +
+
                           `Final ready count: **${a.ready.length}/${MAX_PLAYERS}**`
                 )
 
@@ -2095,13 +2177,16 @@ async function finishAnnouncement(
                 });
 
         await message.edit({
+
             embeds: [
                 embed
             ],
+
             components: []
         });
 
     } catch (error) {
+
         console.log(
             'Close announcement error:',
             error.message
@@ -2126,6 +2211,7 @@ setInterval(
             if (
                 a.closed
             ) {
+
                 announcements.delete(
                     messageId
                 );
@@ -2153,9 +2239,9 @@ setInterval(
             const now =
                 Date.now();
 
-            /*
-             * 2 MINUTE WARNING
-             */
+            /* =============================================
+               2 MINUTE WARNING
+            ============================================= */
 
             if (
                 a.phase ===
@@ -2185,9 +2271,9 @@ setInterval(
                 continue;
             }
 
-            /*
-             * TIMER EXPIRED
-             */
+            /* =============================================
+               TIMER EXPIRED
+            ============================================= */
 
             if (
                 a.phase ===
@@ -2224,7 +2310,9 @@ setInterval(
                                 a.channelId
                             );
 
-                        if (channel) {
+                        if (
+                            channel
+                        ) {
 
                             await channel.send({
 
@@ -2276,11 +2364,6 @@ setInterval(
 
                 } else {
 
-                    /*
-                     * NO RE-PING
-                     * → CLOSE
-                     */
-
                     await finishAnnouncement(
                         a,
                         'timeout'
@@ -2294,9 +2377,9 @@ setInterval(
                 continue;
             }
 
-            /*
-             * EXTENSION EXPIRED
-             */
+            /* =============================================
+               EXTENSION EXPIRED
+            ============================================= */
 
             if (
                 a.phase ===
@@ -2307,10 +2390,14 @@ setInterval(
             ) {
 
                 await finishAnnouncement(
+
                     a,
+
                     a.ready.length >=
                         MAX_PLAYERS
+
                         ? 'full'
+
                         : 'timeout'
                 );
 
@@ -2333,6 +2420,7 @@ async function assignRankRole(
     playerId,
     rank
 ) {
+
     const roleId =
         getRankRoleId(
             rank
@@ -2592,6 +2680,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ You must be a **Tryout Hoster** to create a tryout.',
 
@@ -2613,6 +2702,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ You already have an active tryout lobby.',
 
@@ -2658,7 +2748,7 @@ client.on(
                     };
 
                     /*
-                     * Ping role in the public channel.
+                     * Auto ping the public Tryout Ping role.
                      */
 
                     if (
@@ -2692,6 +2782,7 @@ client.on(
                     updatePresence();
 
                     return interaction.reply({
+
                         content:
                             '✅ Your tryout lobby has been created.',
 
@@ -2716,6 +2807,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ You must be a **Tryout Hoster** to close tryouts.',
 
@@ -2737,6 +2829,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ You do not have an active tryout lobby.',
 
@@ -2746,6 +2839,7 @@ client.on(
                     }
 
                     await interaction.deferReply({
+
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -2768,6 +2862,7 @@ client.on(
 
                     const message =
                         channel
+
                             ? await channel.messages
                                 .fetch(
                                     messageId
@@ -2775,6 +2870,7 @@ client.on(
                                 .catch(
                                     () => null
                                 )
+
                             : null;
 
                     if (
@@ -2828,6 +2924,7 @@ client.on(
                     }
 
                     return interaction.editReply({
+
                         content:
                             '✅ Your tryout lobby has been closed.'
                     });
@@ -2849,6 +2946,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ You must be a **Tryout Hoster** to create results.',
 
@@ -2880,6 +2978,7 @@ client.on(
 
                         content:
                             '✦ **A U R E O N • PLAYER RESULTS** ✦\n\n' +
+
                             'Select the player you want to rate.',
 
                         components: [
@@ -2905,6 +3004,7 @@ client.on(
                 ) {
 
                     return interaction.reply({
+
                         embeds: [
                             buildLeaderboardEmbed()
                         ]
@@ -2936,6 +3036,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 `❌ <@${user.id}> does not have a completed AUREON tryout result yet.`,
 
@@ -2945,6 +3046,7 @@ client.on(
                     }
 
                     return interaction.reply({
+
                         embeds: [
                             profile
                         ]
@@ -2967,6 +3069,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ You must be a **Tryout Hoster** to announce a tryout.',
 
@@ -3003,12 +3106,17 @@ client.on(
                     pendingAnnouncements.set(
                         interaction.user.id,
                         {
+
                             unit,
+
                             amount,
+
                             channelId:
                                 interaction.channelId,
+
                             guildId:
                                 interaction.guildId,
+
                             duration
                         }
                     );
@@ -3041,6 +3149,7 @@ client.on(
                 ) {
 
                     return interaction.reply({
+
                         content:
                             '❌ You must be a **Tryout Hoster**.',
 
@@ -3066,6 +3175,7 @@ client.on(
                 ) {
 
                     return interaction.reply({
+
                         content:
                             '❌ Player not found.',
 
@@ -3082,7 +3192,9 @@ client.on(
                 drafts.set(
                     interaction.user.id,
                     {
+
                         playerId,
+
                         stats:
                             null
                     }
@@ -3123,6 +3235,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ This announcement request expired. Please run the command again.',
 
@@ -3196,6 +3309,7 @@ client.on(
                         embeds: [
 
                             announcementEmbed({
+
                                 ...announcement,
 
                                 messageId:
@@ -3206,6 +3320,7 @@ client.on(
                         components:
 
                             announcementButtons({
+
                                 ...announcement,
 
                                 messageId:
@@ -3250,6 +3365,7 @@ client.on(
                     await message.edit({
 
                         embeds: [
+
                             announcementEmbed(
                                 announcement
                             )
@@ -3275,6 +3391,7 @@ client.on(
                 ) {
 
                     await interaction.deferReply({
+
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -3362,6 +3479,7 @@ client.on(
                     ) {
 
                         return interaction.editReply({
+
                             content:
                                 '❌ All stats must be whole numbers from **0 to 100**.'
                         });
@@ -3398,7 +3516,9 @@ client.on(
                     drafts.set(
                         interaction.user.id,
                         {
+
                             playerId,
+
                             stats
                         }
                     );
@@ -3417,6 +3537,7 @@ client.on(
                     ) {
 
                         return interaction.editReply({
+
                             content:
                                 '❌ Player not found.'
                         });
@@ -3463,6 +3584,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ Please use a valid HTTPS server link.',
 
@@ -3487,6 +3609,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ Your tryout lobby could not be found.',
 
@@ -3572,6 +3695,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ This tryout is no longer active.',
 
@@ -3581,6 +3705,7 @@ client.on(
                     }
 
                     await interaction.deferReply({
+
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -3592,6 +3717,7 @@ client.on(
                     ) {
 
                         return interaction.editReply({
+
                             content:
                                 '⚠️ You are already in this tryout.'
                         });
@@ -3603,6 +3729,7 @@ client.on(
                     ) {
 
                         return interaction.editReply({
+
                             content:
                                 '❌ This tryout is already **10/10**.'
                         });
@@ -3657,6 +3784,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ This tryout is no longer active.',
 
@@ -3666,6 +3794,7 @@ client.on(
                     }
 
                     await interaction.deferReply({
+
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -3676,6 +3805,7 @@ client.on(
                     ) {
 
                         return interaction.editReply({
+
                             content:
                                 '❌ The host cannot leave their own lobby. Close the lobby instead.'
                         });
@@ -3692,6 +3822,7 @@ client.on(
                     ) {
 
                         return interaction.editReply({
+
                             content:
                                 '⚠️ You are not in this tryout.'
                         });
@@ -3747,6 +3878,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ This tryout is no longer active.',
 
@@ -3761,6 +3893,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ Only the host can set the server link.',
 
@@ -3838,6 +3971,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ This tryout is already closed.',
 
@@ -3852,6 +3986,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ Only the host can close this tryout.',
 
@@ -3873,6 +4008,7 @@ client.on(
                         );
 
                     return interaction.reply({
+
                         content:
                             '❌ Tryout closed.',
 
@@ -3907,6 +4043,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ This announcement is no longer active.',
 
@@ -3922,6 +4059,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '⚠️ You are already **READY**.',
 
@@ -3936,6 +4074,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ The ready list is already full.',
 
@@ -4005,6 +4144,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ This announcement is no longer active.',
 
@@ -4024,6 +4164,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '⚠️ You are not currently READY.',
 
@@ -4077,6 +4218,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ This announcement is no longer active.',
 
@@ -4091,6 +4233,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ Only the host can RE-PING.',
 
@@ -4104,6 +4247,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '⚠️ RE-PING has already been used.',
 
@@ -4156,6 +4300,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ You must be a **Tryout Hoster**.',
 
@@ -4175,6 +4320,7 @@ client.on(
                         );
 
                     return interaction.showModal(
+
                         resultModal(
 
                             playerId,
@@ -4205,6 +4351,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ You must be a **Tryout Hoster** to finish results.',
 
@@ -4228,6 +4375,7 @@ client.on(
                     ) {
 
                         return interaction.reply({
+
                             content:
                                 '❌ No result draft was found. Enter the stats again.',
 
@@ -4252,9 +4400,11 @@ client.on(
                         Array.isArray(
                             oldData?.history
                         )
+
                             ? [
                                 ...oldData.history
                             ]
+
                             : [];
 
                     history.push({
@@ -4341,8 +4491,11 @@ client.on(
 
                     const assignment =
                         await assignRankRole(
+
                             interaction,
+
                             playerId,
+
                             stats.rank
                         );
 
@@ -4367,13 +4520,17 @@ client.on(
                             embeds: [
 
                                 resultEmbed(
+
                                     player.user,
+
                                     stats,
+
                                     false
                                 )
                             ],
 
                             allowedMentions: {
+
                                 users: [
                                     playerId
                                 ]
@@ -4507,6 +4664,32 @@ console.log(
     '🚀 Starting AUREON bot...'
 );
 
+console.log(
+    `🖼️ Using banner: ${
+        /^https?:\/\/\S+$/i.test(
+            BANNER_URL
+        )
+            ? 'VALID'
+            : 'INVALID'
+    }`
+);
+
+console.log(
+    `⚡ Hoster role ID: ${
+        TRYOUT_HOSTER_ROLE_ID
+            ? 'VALID'
+            : 'MISSING / INVALID'
+    }`
+);
+
+console.log(
+    `📣 Ping role ID: ${
+        TRYOUT_PING_ROLE_ID
+            ? 'VALID'
+            : 'MISSING / INVALID'
+    }`
+);
+
 client.login(
     TOKEN
 )
@@ -4520,9 +4703,7 @@ client.login(
     .catch(
         error => {
 
-            console.error(
-                ''
-            );
+            console.error('');
 
             console.error(
                 '======================================'
@@ -4554,9 +4735,7 @@ client.login(
                 'The token itself was NOT printed.'
             );
 
-            console.error(
-                ''
-            );
+            console.error('');
 
             process.exit(
                 1
