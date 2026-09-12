@@ -86,43 +86,31 @@ const DEFAULT_BANNER_URL =
 
 const configuredBanner =
     typeof process.env.BANNER_URL === 'string'
-        ? process.env.BANNER_URL
-            .trim()
-            .replace(
-                /^[\"']|[\"']$/g,
-                ''
-            )
+        ? process.env.BANNER_URL.trim().replace(/^[\"']|[\"']$/g, '')
         : '';
 
-let BANNER_URL =
-    /^https?:\/\/\S+$/i.test(
-        configuredBanner
-    )
+const BANNER_URL =
+    /^https?:\/\/\S+$/i.test(configuredBanner)
         ? configuredBanner
         : DEFAULT_BANNER_URL;
-
 /*
- * Keep banner behavior stable.
+ * Discord needs the actual image URL.
  *
- * If the env contains an ImgBB page URL such as:
+ * Important:
  * https://ibb.co/XXXXXXX
+ * is an ImgBB webpage URL, not the image itself.
  *
- * Discord cannot use that page as an image URL.
- *
- * In that case we fall back to the known direct
- * banner URL above.
+ * This resolver attempts to convert an ImgBB page URL
+ * into its og:image direct image URL.
  */
 
-function isDirectUsableBannerUrl(
-    url
-) {
+async function resolveBannerUrl(url) {
     if (
-        typeof url !== 'string' ||
         !/^https?:\/\/\S+$/i.test(
             url
         )
     ) {
-        return false;
+        return '';
     }
 
     try {
@@ -132,26 +120,205 @@ function isDirectUsableBannerUrl(
         const host =
             parsed.hostname.toLowerCase();
 
+        /*
+         * ImgBB page URLs
+         */
         if (
             host === 'ibb.co' ||
             host === 'www.ibb.co'
         ) {
-            return false;
+            if (
+                typeof fetch !== 'function'
+            ) {
+                console.error(
+                    '❌ Banner resolver requires Node.js 18+.'
+                );
+
+                return '';
+            }
+
+            const response =
+                await fetch(
+                    url,
+                    {
+                        redirect:
+                            'follow',
+
+                        headers: {
+                            'User-Agent':
+                                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36',
+
+                            'Accept':
+                                'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
+                        }
+                    }
+                );
+
+            if (
+                !response.ok
+            ) {
+                console.error(
+                    `❌ Banner page returned HTTP ${response.status}.`
+                );
+
+                return '';
+            }
+
+            const html =
+                await response.text();
+
+            const metaTags =
+                html.match(
+                    /<meta\b[^>]*>/gi
+                ) || [];
+
+            /*
+             * First look for OpenGraph image.
+             */
+            for (
+                const tag
+                of metaTags
+            ) {
+                const propertyMatch =
+                    tag.match(
+                        /\b(?:property|name)=["']([^"']+)["']/i
+                    );
+
+                const contentMatch =
+                    tag.match(
+                        /\bcontent=["']([^"']+)["']/i
+                    );
+
+                if (
+                    !propertyMatch ||
+                    !contentMatch
+                ) {
+                    continue;
+                }
+
+                const property =
+                    propertyMatch[1]
+                        .toLowerCase();
+
+                if (
+                    property !==
+                    'og:image' &&
+                    property !==
+                    'twitter:image' &&
+                    property !==
+                    'twitter:image:src'
+                ) {
+                    continue;
+                }
+
+                const imageUrl =
+                    contentMatch[1]
+                        .replace(
+                            /&amp;/g,
+                            '&'
+                        )
+                        .trim();
+
+                if (
+                    /^https?:\/\/\S+$/i.test(
+                        imageUrl
+                    )
+                ) {
+                    return imageUrl;
+                }
+            }
+
+            /*
+             * Fallback:
+             * Find a direct i.ibb.co image URL
+             * in the HTML source.
+             */
+            const directMatches =
+                html.match(
+                    /https?:\/\/(?:i\.)?ibb\.co\/[^"'<>\s]+\.(?:png|jpe?g|webp|gif)(?:\?[^"'<>\s]*)?/gi
+                ) || [];
+
+            if (
+                directMatches.length >
+                0
+            ) {
+                return directMatches[0]
+                    .replace(
+                        /&amp;/g,
+                        '&'
+                    );
+            }
+
+            console.error(
+                '❌ Could not find the direct ImgBB image URL.'
+            );
+
+            return '';
         }
 
-        return true;
-    } catch {
-        return false;
+        /*
+         * Any other URL is assumed to already be
+         * a direct image URL.
+         */
+        return url;
+    } catch (
+        error
+    ) {
+        console.error(
+            '❌ Banner URL resolution failed:',
+            error.message
+        );
+
+        return '';
     }
 }
 
-if (
-    !isDirectUsableBannerUrl(
-        BANNER_URL
-    )
-) {
-    BANNER_URL =
-        DEFAULT_BANNER_URL;
+async function initializeBanner() {
+    const sourceUrl =
+        /^https?:\/\/\S+$/i.test(
+            configuredBanner
+        )
+            ? configuredBanner
+            : DEFAULT_BANNER_URL;
+
+    if (
+        !sourceUrl
+    ) {
+        BANNER_URL = '';
+        console.log(
+            '🖼️ Banner URL ready: NO'
+        );
+        return;
+    }
+
+    const resolved =
+        await resolveBannerUrl(
+            sourceUrl
+        );
+
+    if (
+        resolved
+    ) {
+        BANNER_URL =
+            resolved;
+    } else if (
+        /^https?:\/\/\S+$/i.test(
+            configuredBanner
+        )
+    ) {
+        /*
+         * Keep a configured direct image URL
+         * even if resolving wasn't necessary.
+         */
+        BANNER_URL =
+            configuredBanner;
+    } else {
+        BANNER_URL = '';
+    }
+
+    console.log(
+        `🖼️ Banner URL ready: ${BANNER_URL ? 'YES' : 'NO'}`
+    );
 }
 
 /* =========================================================
@@ -238,30 +405,25 @@ const ELO_SCRIM_PING_ROLE_ID =
     );
 
 const RANK_ROLE_IDS = {
-    F:
-        cleanRoleId(
-            process.env.AURE_RANK_F_ROLE_ID
-        ),
+    F: cleanRoleId(
+        process.env.AURE_RANK_F_ROLE_ID
+    ),
 
-    C:
-        cleanRoleId(
-            process.env.AURE_RANK_C_ROLE_ID
-        ),
+    C: cleanRoleId(
+        process.env.AURE_RANK_C_ROLE_ID
+    ),
 
-    B:
-        cleanRoleId(
-            process.env.AURE_RANK_B_ROLE_ID
-        ),
+    B: cleanRoleId(
+        process.env.AURE_RANK_B_ROLE_ID
+    ),
 
-    A:
-        cleanRoleId(
-            process.env.AURE_RANK_A_ROLE_ID
-        ),
+    A: cleanRoleId(
+        process.env.AURE_RANK_A_ROLE_ID
+    ),
 
-    S:
-        cleanRoleId(
-            process.env.AURE_RANK_S_ROLE_ID
-        )
+    S: cleanRoleId(
+        process.env.AURE_RANK_S_ROLE_ID
+    )
 };
 
 /* =========================================================
@@ -411,20 +573,11 @@ function getRankText(
     rank
 ) {
     return {
-        S:
-            'S • ELITE',
-
-        A:
-            'A • ADVANCED',
-
-        B:
-            'B • STRONG',
-
-        C:
-            'C • DEVELOPING',
-
-        F:
-            'F • BEGINNER'
+        S: 'S • ELITE',
+        A: 'A • ADVANCED',
+        B: 'B • STRONG',
+        C: 'C • DEVELOPING',
+        F: 'F • BEGINNER'
     }[
         rank
     ] || rank;
@@ -979,7 +1132,9 @@ function tryoutEmbed(
             });
 
     if (
-        BANNER_URL
+        /^https?:\/\/\S+$/i.test(
+            BANNER_URL
+        )
     ) {
         embed.setImage(
             BANNER_URL
@@ -1245,7 +1400,9 @@ function scrimChooseEmbed(
             });
 
     if (
-        BANNER_URL
+        /^https?:\/\/\S+$/i.test(
+            BANNER_URL
+        )
     ) {
         embed.setImage(
             BANNER_URL
@@ -1396,7 +1553,9 @@ function scrimPositionEmbed(
             });
 
     if (
-        BANNER_URL
+        /^https?:\/\/\S+$/i.test(
+            BANNER_URL
+        )
     ) {
         embed.setImage(
             BANNER_URL
@@ -1590,7 +1749,9 @@ function scrimRandomEmbed(
             });
 
     if (
-        BANNER_URL
+        /^https?:\/\/\S+$/i.test(
+            BANNER_URL
+        )
     ) {
         embed.setImage(
             BANNER_URL
@@ -1654,7 +1815,9 @@ function scrimReadyEmbed(
             });
 
     if (
-        BANNER_URL
+        /^https?:\/\/\S+$/i.test(
+            BANNER_URL
+        )
     ) {
         embed.setImage(
             BANNER_URL
@@ -1737,7 +1900,6 @@ async function updateScrimMessage(
                         scrim
                     )
                 ],
-
                 components:
                     scrimTypeButtons()
             });
@@ -1755,7 +1917,6 @@ async function updateScrimMessage(
                         scrim
                     )
                 ],
-
                 components:
                     scrimPositionButtons(
                         scrim
@@ -1827,7 +1988,7 @@ async function pingScrimRole(
 
         const roleId =
             scrim.type ===
-                'friendly'
+            'friendly'
                 ? FRIENDLY_SCRIM_PING_ROLE_ID
                 : ELO_SCRIM_PING_ROLE_ID;
 
@@ -2016,10 +2177,6 @@ async function finalizeScrimRandomPick(
         console.log(
             'Scrim finalize error:',
             error.message
-        );
-
-        await updateScrimMessage(
-            scrim
         );
     }
 }
@@ -3345,7 +3502,7 @@ setInterval(
                 a.phase ===
                     'extension' &&
                 now >=
-                a.extensionEndTime
+                    a.extensionEndTime
             ) {
                 await finishAnnouncement(
                     a,
@@ -3453,7 +3610,8 @@ async function assignRankRole(
     if (
         rankRole.managed ||
         rankRole.position >=
-        botMember.roles.highest.position
+            botMember.roles.highest
+                .position
     ) {
         return {
             ok:
@@ -3646,25 +3804,17 @@ client.on(
                     subcommand ===
                     'scrim'
                 ) {
-                    /*
-                     * CRITICAL FIX:
-                     * Respond immediately so Discord does not
-                     * show "The application did not respond"
-                     * while the channel/message is being created.
-                     */
-                    await interaction.deferReply({
-                        flags:
-                            MessageFlags.Ephemeral
-                    });
-
                     if (
                         !isTryoutHoster(
                             interaction.member
                         )
                     ) {
-                        return interaction.editReply({
+                        return interaction.reply({
                             content:
-                                '❌ You must be a **Tryout Hoster** to create a scrim.'
+                                '❌ You must be a **Tryout Hoster** to create a scrim.',
+
+                            flags:
+                                MessageFlags.Ephemeral
                         });
                     }
 
@@ -3689,18 +3839,24 @@ client.on(
                     if (
                         existingTryout
                     ) {
-                        return interaction.editReply({
+                        return interaction.reply({
                             content:
-                                '❌ You already have an active tryout lobby.'
+                                '❌ You already have an active tryout lobby.',
+
+                            flags:
+                                MessageFlags.Ephemeral
                         });
                     }
 
                     if (
                         existingScrim
                     ) {
-                        return interaction.editReply({
+                        return interaction.reply({
                             content:
-                                '❌ You already have an active scrim.'
+                                '❌ You already have an active scrim.',
+
+                            flags:
+                                MessageFlags.Ephemeral
                         });
                     }
 
@@ -3751,8 +3907,7 @@ client.on(
                                 scrimTypeButtons(),
 
                             allowedMentions: {
-                                parse:
-                                    []
+                                parse: []
                             }
                         });
 
@@ -3764,9 +3919,12 @@ client.on(
                         scrim
                     );
 
-                    return interaction.editReply({
+                    return interaction.reply({
                         content:
-                            '✅ Scrim setup created.'
+                            '✅ Scrim setup created.',
+
+                        flags:
+                            MessageFlags.Ephemeral
                     });
                 }
 
@@ -3843,8 +4001,7 @@ client.on(
                             ),
 
                         allowedMentions: {
-                            parse:
-                                []
+                            parse: []
                         }
                     };
 
@@ -3964,40 +4121,32 @@ client.on(
                     if (
                         message
                     ) {
-                        const closedEmbed =
-                            new EmbedBuilder()
-                                .setColor(
-                                    GOLD
-                                )
-                                .setAuthor({
-                                    name:
-                                        '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍'
-                                })
-                                .setTitle(
-                                    'ᴛʀʏᴏᴜᴛ ʜᴜʙ'
-                                )
-                                .setDescription(
-                                    '✦ **L O B B Y** ✦\n\n' +
-                                    '🔒 **CLOSED**\n\n' +
-                                    `Host: <@${lobby.hostId}>\n` +
-                                    `Players: **${lobby.players.length}/${MAX_PLAYERS}**`
-                                )
-                                .setFooter({
-                                    text:
-                                        '✦ A U R E O N • E U ✦'
-                                });
-
-                        if (
-                            BANNER_URL
-                        ) {
-                            closedEmbed.setImage(
-                                BANNER_URL
-                            );
-                        }
-
                         await message.edit({
                             embeds: [
-                                closedEmbed
+                                new EmbedBuilder()
+                                    .setColor(
+                                        GOLD
+                                    )
+                                    .setAuthor({
+                                        name:
+                                            '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍'
+                                    })
+                                    .setTitle(
+                                        'ᴛʀʏᴏᴜᴛ ʜᴜʙ'
+                                    )
+                                    .setDescription(
+                                        '✦ **L O B B Y** ✦\n\n' +
+                                        '🔒 **CLOSED**\n\n' +
+                                        `Host: <@${lobby.hostId}>\n` +
+                                        `Players: **${lobby.players.length}/${MAX_PLAYERS}**`
+                                    )
+                                    .setFooter({
+                                        text:
+                                            '✦ A U R E O N • E U ✦'
+                                    })
+                                    .setImage(
+                                        BANNER_URL
+                                    )
                             ],
 
                             components:
@@ -4847,7 +4996,7 @@ client.on(
                     ) {
                         return interaction.reply({
                             content:
-                                '❌ ELO scrims are not configured yet. Add **MAIN_TEAM_ROLE_ID** in your Environment Variables.',
+                                '❌ ELO scrims are not configured yet. Add **MAIN_TEAM_ROLE_ID** in your .env.',
 
                             flags:
                                 MessageFlags.Ephemeral
@@ -4895,7 +5044,8 @@ client.on(
 
                         return interaction.reply({
                             content:
-                                '❌ Could not update the scrim GUI. Check the bot console.',
+                                '❌ Could not update the scrim GUI. Please try again.',
+
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4959,20 +5109,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ This scrim is no longer accepting players.',
-
-                            flags:
-                                MessageFlags.Ephemeral
-                        });
-                    }
-
-                    if (
-                        !SCRIM_POSITIONS.includes(
-                            position
-                        )
-                    ) {
-                        return interaction.reply({
-                            content:
-                                '❌ Invalid position.',
 
                             flags:
                                 MessageFlags.Ephemeral
@@ -5327,8 +5463,9 @@ client.on(
                     }
 
                     /*
-                     * Delete FIRST so the host can create
-                     * a new scrim immediately.
+                     * Delete from Map FIRST.
+                     * This lets the host create another scrim
+                     * immediately after closing this one.
                      */
                     scrims.delete(
                         scrim.messageId
@@ -6155,7 +6292,8 @@ client.on(
                     });
                 }
             }
-        } catch (
+        }
+         catch (
             error
         ) {
             console.error(
@@ -6246,9 +6384,7 @@ client.on(
 
 normalizeDatabase();
 
-console.log(
-    '🚀 Starting AUREON bot...'
-);
+console.log('🚀 Starting AUREON bot...');
 
 console.log(
     `⚡ Hoster role ID: ${
@@ -6282,76 +6418,28 @@ console.log(
     }`
 );
 
-console.log(
-    `🔴 ELO Scrim Ping: ${
-        ELO_SCRIM_PING_ROLE_ID
-            ? 'VALID'
-            : 'MISSING / INVALID'
-    }`
-);
-
-console.log(
-    `🖼️ Banner: ${
-        BANNER_URL
-            ? 'VALID'
-            : 'MISSING'
-    }`
-);
-
-console.log(
-    `🏆 Rank Roles: ${
-        Object.values(
-            RANK_ROLE_IDS
-        ).every(
-            Boolean
-        )
-            ? 'CONFIGURED'
-            : 'INCOMPLETE'
-    }`
-);
-
 /* =========================================================
    DISCORD LOGIN
 ========================================================= */
 
-const LOGIN_TOKEN =
-    String(
-        process.env.TOKEN ||
-        process.env.DISCORD_TOKEN ||
-        TOKEN ||
-        ''
-    )
-        .trim()
-        .replace(
-            /^["']|["']$/g,
-            ''
-        )
-        .replace(
-            /^Bot\s+/i,
-            ''
-        );
+const LOGIN_TOKEN = String(
+    process.env.TOKEN ||
+    process.env.DISCORD_TOKEN ||
+    TOKEN ||
+    ''
+)
+    .trim()
+    .replace(/^["']|["']$/g, '')
+    .replace(/^Bot\s+/i, '');
 
-/* =========================================================
-   TOKEN CHECK
-========================================================= */
-
-if (
-    !LOGIN_TOKEN
-) {
+if (!LOGIN_TOKEN) {
     console.error('');
-    console.error(
-        '======================================'
-    );
-    console.error(
-        '❌ DISCORD TOKEN IS MISSING'
-    );
-    console.error(
-        '======================================'
-    );
+    console.error('======================================');
+    console.error('❌ DISCORD TOKEN IS MISSING');
+    console.error('======================================');
     console.error(
         'Railway Environment Variables must contain TOKEN.'
     );
-
     process.exit(1);
 }
 
@@ -6361,56 +6449,31 @@ if (
 
 (async () => {
     try {
-        console.log(
-            '🔐 Attempting Discord login...'
-        );
+        console.log('🔐 Attempting Discord login...');
 
-        await client.login(
-            LOGIN_TOKEN
-        );
+        await client.login(LOGIN_TOKEN);
 
         console.log(
             '✅ Discord login successful.'
         );
-    } catch (
-        error
-    ) {
+
+    } catch (error) {
         console.error('');
+        console.error('======================================');
+        console.error('❌ DISCORD LOGIN FAILED');
+        console.error('======================================');
         console.error(
-            '======================================'
+            `Error code: ${error?.code ?? 'UNKNOWN'}`
         );
         console.error(
-            '❌ DISCORD LOGIN FAILED'
+            `Error name: ${error?.name ?? 'UNKNOWN'}`
         );
         console.error(
-            '======================================'
+            `Error message: ${error?.message ?? 'UNKNOWN'}`
         );
-
-        console.error(
-            `Error code: ${
-                error?.code ??
-                'UNKNOWN'
-            }`
-        );
-
-        console.error(
-            `Error name: ${
-                error?.name ??
-                'UNKNOWN'
-            }`
-        );
-
-        console.error(
-            `Error message: ${
-                error?.message ??
-                'UNKNOWN'
-            }`
-        );
-
         console.error(
             'The token itself was NOT printed.'
         );
-
         console.error('');
 
         process.exit(1);
