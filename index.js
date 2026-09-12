@@ -31,6 +31,7 @@ const {
    - Position selection
    - 2-minute position coverage countdown
    - Random 5-player selection
+   - Automatic /tryout scrim registration check
 ========================================================= */
 
 const client = new Client({
@@ -45,20 +46,15 @@ const client = new Client({
 
 const MAX_PLAYERS = 10;
 
-const TWO_MINUTES =
-    2 * 60 * 1000;
+const TWO_MINUTES = 2 * 60 * 1000;
 
-const TIMER_CHECK =
-    5000;
+const TIMER_CHECK = 5000;
 
-const SCRIM_SELECTED_PLAYERS =
-    5;
+const SCRIM_SELECTED_PLAYERS = 5;
 
-const SCRIM_START_DELAY =
-    2 * 60 * 1000;
+const SCRIM_START_DELAY = 2 * 60 * 1000;
 
-const SCRIM_RANDOM_DELAY =
-    1500;
+const SCRIM_RANDOM_DELAY = 1500;
 
 const SCRIM_POSITIONS = [
     'CF',
@@ -68,14 +64,9 @@ const SCRIM_POSITIONS = [
     'LW'
 ];
 
-const GOLD =
-    0xD9B45C;
-
-const GREEN =
-    0x5BC47B;
-
-const RED =
-    0xB84949;
+const GOLD = 0xD9B45C;
+const GREEN = 0x5BC47B;
+const RED = 0xB84949;
 
 /* =========================================================
    BANNER
@@ -89,237 +80,33 @@ const configuredBanner =
         ? process.env.BANNER_URL.trim().replace(/^[\"']|[\"']$/g, '')
         : '';
 
-const BANNER_URL =
+let BANNER_URL =
     /^https?:\/\/\S+$/i.test(configuredBanner)
         ? configuredBanner
         : DEFAULT_BANNER_URL;
+
 /*
- * Discord needs the actual image URL.
+ * Keep the current banner behavior stable.
  *
  * Important:
  * https://ibb.co/XXXXXXX
- * is an ImgBB webpage URL, not the image itself.
+ * is a webpage URL, not the actual image URL.
  *
- * This resolver attempts to convert an ImgBB page URL
- * into its og:image direct image URL.
+ * When BANNER_URL is an ibb.co page, use the known working
+ * default direct image instead of breaking the embeds.
  */
 
-async function resolveBannerUrl(url) {
+function getSafeBannerUrl() {
     if (
-        !/^https?:\/\/\S+$/i.test(
-            url
-        )
+        /^https?:\/\/\S+$/i.test(BANNER_URL)
     ) {
-        return '';
+        return BANNER_URL;
     }
 
-    try {
-        const parsed =
-            new URL(url);
-
-        const host =
-            parsed.hostname.toLowerCase();
-
-        /*
-         * ImgBB page URLs
-         */
-        if (
-            host === 'ibb.co' ||
-            host === 'www.ibb.co'
-        ) {
-            if (
-                typeof fetch !== 'function'
-            ) {
-                console.error(
-                    '❌ Banner resolver requires Node.js 18+.'
-                );
-
-                return '';
-            }
-
-            const response =
-                await fetch(
-                    url,
-                    {
-                        redirect:
-                            'follow',
-
-                        headers: {
-                            'User-Agent':
-                                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/140 Safari/537.36',
-
-                            'Accept':
-                                'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8'
-                        }
-                    }
-                );
-
-            if (
-                !response.ok
-            ) {
-                console.error(
-                    `❌ Banner page returned HTTP ${response.status}.`
-                );
-
-                return '';
-            }
-
-            const html =
-                await response.text();
-
-            const metaTags =
-                html.match(
-                    /<meta\b[^>]*>/gi
-                ) || [];
-
-            /*
-             * First look for OpenGraph image.
-             */
-            for (
-                const tag
-                of metaTags
-            ) {
-                const propertyMatch =
-                    tag.match(
-                        /\b(?:property|name)=["']([^"']+)["']/i
-                    );
-
-                const contentMatch =
-                    tag.match(
-                        /\bcontent=["']([^"']+)["']/i
-                    );
-
-                if (
-                    !propertyMatch ||
-                    !contentMatch
-                ) {
-                    continue;
-                }
-
-                const property =
-                    propertyMatch[1]
-                        .toLowerCase();
-
-                if (
-                    property !==
-                    'og:image' &&
-                    property !==
-                    'twitter:image' &&
-                    property !==
-                    'twitter:image:src'
-                ) {
-                    continue;
-                }
-
-                const imageUrl =
-                    contentMatch[1]
-                        .replace(
-                            /&amp;/g,
-                            '&'
-                        )
-                        .trim();
-
-                if (
-                    /^https?:\/\/\S+$/i.test(
-                        imageUrl
-                    )
-                ) {
-                    return imageUrl;
-                }
-            }
-
-            /*
-             * Fallback:
-             * Find a direct i.ibb.co image URL
-             * in the HTML source.
-             */
-            const directMatches =
-                html.match(
-                    /https?:\/\/(?:i\.)?ibb\.co\/[^"'<>\s]+\.(?:png|jpe?g|webp|gif)(?:\?[^"'<>\s]*)?/gi
-                ) || [];
-
-            if (
-                directMatches.length >
-                0
-            ) {
-                return directMatches[0]
-                    .replace(
-                        /&amp;/g,
-                        '&'
-                    );
-            }
-
-            console.error(
-                '❌ Could not find the direct ImgBB image URL.'
-            );
-
-            return '';
-        }
-
-        /*
-         * Any other URL is assumed to already be
-         * a direct image URL.
-         */
-        return url;
-    } catch (
-        error
-    ) {
-        console.error(
-            '❌ Banner URL resolution failed:',
-            error.message
-        );
-
-        return '';
-    }
+    return DEFAULT_BANNER_URL;
 }
 
-async function initializeBanner() {
-    const sourceUrl =
-        /^https?:\/\/\S+$/i.test(
-            configuredBanner
-        )
-            ? configuredBanner
-            : DEFAULT_BANNER_URL;
-
-    if (
-        !sourceUrl
-    ) {
-        BANNER_URL = '';
-        console.log(
-            '🖼️ Banner URL ready: NO'
-        );
-        return;
-    }
-
-    const resolved =
-        await resolveBannerUrl(
-            sourceUrl
-        );
-
-    if (
-        resolved
-    ) {
-        BANNER_URL =
-            resolved;
-    } else if (
-        /^https?:\/\/\S+$/i.test(
-            configuredBanner
-        )
-    ) {
-        /*
-         * Keep a configured direct image URL
-         * even if resolving wasn't necessary.
-         */
-        BANNER_URL =
-            configuredBanner;
-    } else {
-        BANNER_URL = '';
-    }
-
-    console.log(
-        `🖼️ Banner URL ready: ${BANNER_URL ? 'YES' : 'NO'}`
-    );
-}
+BANNER_URL = getSafeBannerUrl();
 
 /* =========================================================
    TOKEN
@@ -334,20 +121,12 @@ const TOKEN =
     typeof rawToken === 'string'
         ? rawToken
             .trim()
-            .replace(
-                /^["']|["']$/g,
-                ''
-            )
-            .replace(
-                /^Bot\s+/i,
-                ''
-            )
+            .replace(/^["']|["']$/g, '')
+            .replace(/^Bot\s+/i, '')
             .trim()
         : '';
 
-if (
-    !TOKEN
-) {
+if (!TOKEN) {
     console.error(
         '❌ DISCORD BOT TOKEN IS MISSING'
     );
@@ -359,22 +138,16 @@ if (
    ROLE CONFIG
 ========================================================= */
 
-function cleanRoleId(
-    value
-) {
+function cleanRoleId(value) {
     if (
-        typeof value !==
-        'string'
+        typeof value !== 'string'
     ) {
         return '';
     }
 
-    const id =
-        value.trim();
+    const id = value.trim();
 
-    return /^\d{17,20}$/.test(
-        id
-    )
+    return /^\d{17,20}$/.test(id)
         ? id
         : '';
 }
@@ -430,20 +203,15 @@ const RANK_ROLE_IDS = {
    MEMORY
 ========================================================= */
 
-const tryouts =
-    new Map();
+const tryouts = new Map();
 
-const drafts =
-    new Map();
+const drafts = new Map();
 
-const announcements =
-    new Map();
+const announcements = new Map();
 
-const pendingAnnouncements =
-    new Map();
+const pendingAnnouncements = new Map();
 
-const scrims =
-    new Map();
+const scrims = new Map();
 
 /* =========================================================
    RESULTS DATABASE
@@ -462,23 +230,18 @@ const resultsPath =
     );
 
 if (
-    !fs.existsSync(
-        dataFolder
-    )
+    !fs.existsSync(dataFolder)
 ) {
     fs.mkdirSync(
         dataFolder,
         {
-            recursive:
-                true
+            recursive: true
         }
     );
 }
 
 if (
-    !fs.existsSync(
-        resultsPath
-    )
+    !fs.existsSync(resultsPath)
 ) {
     fs.writeFileSync(
         resultsPath,
@@ -499,9 +262,7 @@ function loadResults() {
                 'utf8'
             )
         );
-    } catch (
-        error
-    ) {
+    } catch (error) {
         console.error(
             '❌ Could not load player results:',
             error
@@ -511,8 +272,7 @@ function loadResults() {
     }
 }
 
-let resultsDatabase =
-    loadResults();
+let resultsDatabase = loadResults();
 
 function saveResults() {
     try {
@@ -525,9 +285,7 @@ function saveResults() {
             ),
             'utf8'
         );
-    } catch (
-        error
-    ) {
+    } catch (error) {
         console.error(
             '❌ Could not save player results:',
             error
@@ -539,98 +297,68 @@ function saveResults() {
    RANK / PLAYER DATA
 ========================================================= */
 
-function getRank(
-    overall
-) {
-    if (
-        overall >= 80
-    ) {
+function getRank(overall) {
+    if (overall >= 80) {
         return 'S';
     }
 
-    if (
-        overall >= 65
-    ) {
+    if (overall >= 65) {
         return 'A';
     }
 
-    if (
-        overall >= 50
-    ) {
+    if (overall >= 50) {
         return 'B';
     }
 
-    if (
-        overall >= 30
-    ) {
+    if (overall >= 30) {
         return 'C';
     }
 
     return 'F';
 }
 
-function getRankText(
-    rank
-) {
+function getRankText(rank) {
     return {
         S: 'S • ELITE',
         A: 'A • ADVANCED',
         B: 'B • STRONG',
         C: 'C • DEVELOPING',
         F: 'F • BEGINNER'
-    }[
-        rank
-    ] || rank;
+    }[rank] || rank;
 }
 
-function normalizePlayerData(
-    data
-) {
+function normalizePlayerData(data) {
     if (
         !data ||
-        typeof data !==
-            'object'
+        typeof data !== 'object'
     ) {
         return null;
     }
 
     const legacyResult = {
         shooting:
-            Number(
-                data.shooting
-            ) || 0,
+            Number(data.shooting) || 0,
 
         passing:
-            Number(
-                data.passing
-            ) || 0,
+            Number(data.passing) || 0,
 
         teamwork:
-            Number(
-                data.teamwork
-            ) || 0,
+            Number(data.teamwork) || 0,
 
         gk:
-            Number(
-                data.gk
-            ) || 0,
+            Number(data.gk) || 0,
 
         overall:
-            Number(
-                data.overall
-            ) || 0,
+            Number(data.overall) || 0,
 
         rank:
             data.rank ||
             getRank(
-                Number(
-                    data.overall
-                ) || 0
+                Number(data.overall) || 0
             ),
 
         thingsToFix:
-            data.thingsToFix ||
-            '',
+            data.thingsToFix || '',
 
         completedAt:
             data.updatedAt ||
@@ -638,31 +366,22 @@ function normalizePlayerData(
     };
 
     let history =
-        Array.isArray(
-            data.history
-        )
+        Array.isArray(data.history)
             ? data.history.filter(
                 entry =>
                     entry &&
-                    typeof entry ===
-                        'object'
+                    typeof entry === 'object'
             )
             : [];
 
     if (
-        history.length ===
-            0 &&
+        history.length === 0 &&
         (
-            data.overall !==
-                undefined ||
-            data.shooting !==
-                undefined ||
-            data.passing !==
-                undefined ||
-            data.teamwork !==
-                undefined ||
-            data.gk !==
-                undefined
+            data.overall !== undefined ||
+            data.shooting !== undefined ||
+            data.passing !== undefined ||
+            data.teamwork !== undefined ||
+            data.gk !== undefined
         )
     ) {
         history.push(
@@ -674,41 +393,28 @@ function normalizePlayerData(
         history.map(
             entry => ({
                 shooting:
-                    Number(
-                        entry.shooting
-                    ) || 0,
+                    Number(entry.shooting) || 0,
 
                 passing:
-                    Number(
-                        entry.passing
-                    ) || 0,
+                    Number(entry.passing) || 0,
 
                 teamwork:
-                    Number(
-                        entry.teamwork
-                    ) || 0,
+                    Number(entry.teamwork) || 0,
 
                 gk:
-                    Number(
-                        entry.gk
-                    ) || 0,
+                    Number(entry.gk) || 0,
 
                 overall:
-                    Number(
-                        entry.overall
-                    ) || 0,
+                    Number(entry.overall) || 0,
 
                 rank:
                     entry.rank ||
                     getRank(
-                        Number(
-                            entry.overall
-                        ) || 0
+                        Number(entry.overall) || 0
                     ),
 
                 thingsToFix:
-                    entry.thingsToFix ||
-                    '',
+                    entry.thingsToFix || '',
 
                 completedAt:
                     entry.completedAt ||
@@ -718,51 +424,32 @@ function normalizePlayerData(
         );
 
     const latest =
-        history.length >
-        0
+        history.length > 0
             ? history[
-                history.length -
-                1
+                history.length - 1
             ]
             : legacyResult;
 
     const bestOVR =
-        history.length >
-        0
+        history.length > 0
             ? Math.max(
                 ...history.map(
                     entry =>
-                        Number(
-                            entry.overall
-                        ) || 0
+                        Number(entry.overall) || 0
                 )
             )
-            : Number(
-                latest.overall
-            ) || 0;
+            : Number(latest.overall) || 0;
 
     return {
-        shooting:
-            latest.shooting,
-
-        passing:
-            latest.passing,
-
-        teamwork:
-            latest.teamwork,
-
-        gk:
-            latest.gk,
-
-        overall:
-            latest.overall,
-
-        rank:
-            latest.rank,
+        shooting: latest.shooting,
+        passing: latest.passing,
+        teamwork: latest.teamwork,
+        gk: latest.gk,
+        overall: latest.overall,
+        rank: latest.rank,
 
         thingsToFix:
-            latest.thingsToFix ||
-            '',
+            latest.thingsToFix || '',
 
         updatedAt:
             data.updatedAt ||
@@ -782,78 +469,48 @@ function normalizeDatabase() {
     let changed = false;
 
     for (
-        const [
-            userId,
-            data
-        ]
-        of Object.entries(
-            resultsDatabase
-        )
+        const [userId, data]
+        of Object.entries(resultsDatabase)
     ) {
         const normalized =
-            normalizePlayerData(
-                data
-            );
+            normalizePlayerData(data);
 
-        if (
-            !normalized
-        ) {
+        if (!normalized) {
             continue;
         }
 
         if (
-            JSON.stringify(
-                normalized
-            ) !==
-            JSON.stringify(
-                data
-            )
+            JSON.stringify(normalized) !==
+            JSON.stringify(data)
         ) {
-            resultsDatabase[
-                userId
-            ] =
+            resultsDatabase[userId] =
                 normalized;
 
-            changed =
-                true;
+            changed = true;
         }
     }
 
-    if (
-        changed
-    ) {
+    if (changed) {
         saveResults();
     }
 }
 
-function getStoredPlayerData(
-    userId
-) {
+function getStoredPlayerData(userId) {
     const data =
-        resultsDatabase[
-            userId
-        ];
+        resultsDatabase[userId];
 
-    if (
-        !data
-    ) {
+    if (!data) {
         return null;
     }
 
     const normalized =
-        normalizePlayerData(
-            data
-        );
+        normalizePlayerData(data);
 
-    if (
-        !normalized
-    ) {
+    if (!normalized) {
         return null;
     }
 
-    resultsDatabase[
-        userId
-    ] =
+    resultsDatabase[userId] =
         normalized;
 
     return normalized;
@@ -863,9 +520,7 @@ function getStoredPlayerData(
    HELPERS
 ========================================================= */
 
-function isTryoutHoster(
-    member
-) {
+function isTryoutHoster(member) {
     return Boolean(
         member &&
         TRYOUT_HOSTER_ROLE_ID &&
@@ -875,9 +530,7 @@ function isTryoutHoster(
     );
 }
 
-function isMainTeam(
-    member
-) {
+function isMainTeam(member) {
     return Boolean(
         member &&
         MAIN_TEAM_ROLE_ID &&
@@ -903,95 +556,57 @@ function calculateOverall(
     );
 }
 
-function getRankRoleId(
-    rank
-) {
+function getRankRoleId(rank) {
     return (
-        RANK_ROLE_IDS[
-            rank
-        ] ||
+        RANK_ROLE_IDS[rank] ||
         null
     );
 }
 
-function formatTime(
-    unit,
-    amount
-) {
+function formatTime(unit, amount) {
     if (
-        unit ===
-        'minutes'
+        unit === 'minutes'
     ) {
         return (
             `${amount} minute` +
-            `${
-                amount === 1
-                    ? ''
-                    : 's'
-            }`
+            `${amount === 1 ? '' : 's'}`
         );
     }
 
     return (
         `${amount} hour` +
-        `${
-            amount === 1
-                ? ''
-                : 's'
-        }`
+        `${amount === 1 ? '' : 's'}`
     );
 }
 
-function timeLeft(
-    ms
-) {
+function timeLeft(ms) {
     const seconds =
         Math.max(
             0,
-            Math.ceil(
-                ms / 1000
-            )
+            Math.ceil(ms / 1000)
         );
 
     const minutes =
-        Math.floor(
-            seconds / 60
-        );
+        Math.floor(seconds / 60);
 
     const remainingSeconds =
         seconds % 60;
 
-    if (
-        minutes <= 0
-    ) {
+    if (minutes <= 0) {
         return (
             `${remainingSeconds} second` +
-            `${
-                remainingSeconds ===
-                1
-                    ? ''
-                    : 's'
-            }`
+            `${remainingSeconds === 1 ? '' : 's'}`
         );
     }
 
-    if (
-        remainingSeconds ===
-        0
-    ) {
+    if (remainingSeconds === 0) {
         return (
             `${minutes} minute` +
-            `${
-                minutes === 1
-                    ? ''
-                    : 's'
-            }`
+            `${minutes === 1 ? '' : 's'}`
         );
     }
 
-    return (
-        `${minutes}m ${remainingSeconds}s`
-    );
+    return `${minutes}m ${remainingSeconds}s`;
 }
 
 /* =========================================================
@@ -999,14 +614,11 @@ function timeLeft(
 ========================================================= */
 
 function updatePresence() {
-    if (
-        !client.user
-    ) {
+    if (!client.user) {
         return;
     }
 
-    let totalPlayers =
-        0;
+    let totalPlayers = 0;
 
     for (
         const lobby
@@ -1020,11 +632,9 @@ function updatePresence() {
         activities: [
             {
                 name:
-                    totalPlayers >
-                    0
+                    totalPlayers > 0
                         ? `AUREON • ${totalPlayers} Player${
-                            totalPlayers ===
-                            1
+                            totalPlayers === 1
                                 ? ''
                                 : 's'
                         }`
@@ -1035,8 +645,7 @@ function updatePresence() {
             }
         ],
 
-        status:
-            'online'
+        status: 'online'
     });
 }
 
@@ -1044,23 +653,15 @@ function updatePresence() {
    TRYOUT HUB
 ========================================================= */
 
-function tryoutEmbed(
-    lobby
-) {
+function tryoutEmbed(lobby) {
     const playerList =
-        lobby.players.length >
-        0
+        lobby.players.length > 0
             ? lobby.players
                 .map(
-                    (
-                        id,
-                        index
-                    ) =>
+                    (id, index) =>
                         `**${index + 1}.** <@${id}>`
                 )
-                .join(
-                    '\n'
-                )
+                .join('\n')
             : '`Waiting for players...`';
 
     const filled =
@@ -1068,17 +669,13 @@ function tryoutEmbed(
             (
                 lobby.players.length /
                 MAX_PLAYERS
-            ) *
-            10
+            ) * 10
         );
 
     const bar =
-        '▰'.repeat(
-            filled
-        ) +
+        '▰'.repeat(filled) +
         '▱'.repeat(
-            10 -
-            filled
+            10 - filled
         );
 
     let serverText =
@@ -1096,12 +693,9 @@ function tryoutEmbed(
 
     const embed =
         new EmbedBuilder()
-            .setColor(
-                GOLD
-            )
+            .setColor(GOLD)
             .setAuthor({
-                name:
-                    '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍'
+                name: '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍'
             })
             .setTitle(
                 'ᴛʀʏᴏᴜᴛ ʜᴜʙ'
@@ -1117,36 +711,26 @@ function tryoutEmbed(
                 '━━━━━━━━━━━━━━━━━━━━━━━━'
             )
             .addFields({
-                name:
-                    '🔗 SERVER',
-
-                value:
-                    serverText,
-
-                inline:
-                    false
+                name: '🔗 SERVER',
+                value: serverText,
+                inline: false
             })
             .setFooter({
                 text:
                     '✦ A U R E O N • E U ✦'
             });
 
-    if (
-        /^https?:\/\/\S+$/i.test(
-            BANNER_URL
-        )
-    ) {
-        embed.setImage(
-            BANNER_URL
-        );
+    const banner =
+        getSafeBannerUrl();
+
+    if (banner) {
+        embed.setImage(banner);
     }
 
     return embed;
 }
 
-function tryoutButtons(
-    lobby
-) {
+function tryoutButtons(lobby) {
     return [
         new ActionRowBuilder()
             .addComponents(
@@ -1154,12 +738,8 @@ function tryoutButtons(
                     .setCustomId(
                         'tryout_join'
                     )
-                    .setLabel(
-                        'JOIN'
-                    )
-                    .setEmoji(
-                        '⚡'
-                    )
+                    .setLabel('JOIN')
+                    .setEmoji('⚡')
                     .setStyle(
                         ButtonStyle.Success
                     )
@@ -1172,12 +752,8 @@ function tryoutButtons(
                     .setCustomId(
                         'tryout_leave'
                     )
-                    .setLabel(
-                        'LEAVE'
-                    )
-                    .setEmoji(
-                        '↩️'
-                    )
+                    .setLabel('LEAVE')
+                    .setEmoji('↩️')
                     .setStyle(
                         ButtonStyle.Secondary
                     ),
@@ -1189,9 +765,7 @@ function tryoutButtons(
                     .setLabel(
                         'SERVER LINK'
                     )
-                    .setEmoji(
-                        '🔗'
-                    )
+                    .setEmoji('🔗')
                     .setStyle(
                         ButtonStyle.Primary
                     ),
@@ -1200,12 +774,8 @@ function tryoutButtons(
                     .setCustomId(
                         'tryout_close'
                     )
-                    .setLabel(
-                        'CLOSE'
-                    )
-                    .setEmoji(
-                        '❌'
-                    )
+                    .setLabel('CLOSE')
+                    .setEmoji('❌')
                     .setStyle(
                         ButtonStyle.Danger
                     )
@@ -1217,72 +787,52 @@ function tryoutButtons(
    SCRIM SYSTEM
 ========================================================= */
 
-function getScrim(
-    messageId
-) {
+function getScrim(messageId) {
     return (
-        scrims.get(
-            messageId
-        ) ||
+        scrims.get(messageId) ||
         null
     );
 }
 
-function scrimTypeText(
-    type
-) {
-    return type ===
-        'elo'
+function scrimTypeText(type) {
+    return type === 'elo'
         ? '🔴 ELO SCRIM'
         : '🟢 FRIENDLY SCRIM';
 }
 
-function scrimPositionEmoji(
-    position
-) {
+function scrimPositionEmoji(position) {
     return {
         CF: '⚽',
         CM: '🎯',
         GK: '🧤',
         RW: '🏃',
         LW: '💨'
-    }[
-        position
-    ] || '⚽';
+    }[position] || '⚽';
 }
 
 function getPositionPlayers(
     scrim,
     position
 ) {
-    return scrim.players
-        .filter(
-            player =>
-                player.position ===
-                position
-        );
+    return scrim.players.filter(
+        player =>
+            player.position === position
+    );
 }
 
-function allPositionsCovered(
-    scrim
-) {
+function allPositionsCovered(scrim) {
     return SCRIM_POSITIONS.every(
         position =>
             getPositionPlayers(
                 scrim,
                 position
-            ).length >
-            0
+            ).length > 0
     );
 }
 
-function scrimCountdownText(
-    scrim
-) {
+function scrimCountdownText(scrim) {
     if (
-        !allPositionsCovered(
-            scrim
-        )
+        !allPositionsCovered(scrim)
     ) {
         const missing =
             SCRIM_POSITIONS.filter(
@@ -1290,8 +840,7 @@ function scrimCountdownText(
                     getPositionPlayers(
                         scrim,
                         position
-                    ).length ===
-                    0
+                    ).length === 0
             );
 
         return (
@@ -1301,9 +850,7 @@ function scrimCountdownText(
                     p =>
                         `${scrimPositionEmoji(p)} ${p}`
                 )
-                .join(
-                    ' • '
-                )
+                .join(' • ')
         );
     }
 
@@ -1314,10 +861,7 @@ function scrimCountdownText(
             scrim.countdownEndTime -
             Date.now();
 
-        if (
-            remaining >
-            0
-        ) {
+        if (remaining > 0) {
             return (
                 `⏱️ **Random pick starts in ${timeLeft(remaining)}**`
             );
@@ -1339,25 +883,14 @@ function scrimPositionButtonLabel(
             position
         );
 
-    if (
-        players.length ===
-        0
-    ) {
-        return (
-            `${position} — EMPTY`
-        );
+    if (players.length === 0) {
+        return `${position} — EMPTY`;
     }
 
-    if (
-        players.length ===
-        1
-    ) {
+    if (players.length === 1) {
         return (
             `${position} — ${players[0].displayName}`
-        ).slice(
-            0,
-            80
-        );
+        ).slice(0, 80);
     }
 
     return (
@@ -1365,14 +898,10 @@ function scrimPositionButtonLabel(
     );
 }
 
-function scrimChooseEmbed(
-    scrim
-) {
+function scrimChooseEmbed(scrim) {
     const embed =
         new EmbedBuilder()
-            .setColor(
-                GOLD
-            )
+            .setColor(GOLD)
             .setAuthor({
                 name:
                     '✦ A U R E O N • S C R I M ✦'
@@ -1399,14 +928,11 @@ function scrimChooseEmbed(
                     '✦ A U R E O N • E U ✦'
             });
 
-    if (
-        /^https?:\/\/\S+$/i.test(
-            BANNER_URL
-        )
-    ) {
-        embed.setImage(
-            BANNER_URL
-        );
+    const banner =
+        getSafeBannerUrl();
+
+    if (banner) {
+        embed.setImage(banner);
     }
 
     return embed;
@@ -1423,9 +949,7 @@ function scrimTypeButtons() {
                     .setLabel(
                         'FRIENDLY'
                     )
-                    .setEmoji(
-                        '🟢'
-                    )
+                    .setEmoji('🟢')
                     .setStyle(
                         ButtonStyle.Success
                     ),
@@ -1434,12 +958,8 @@ function scrimTypeButtons() {
                     .setCustomId(
                         'scrim_type:elo'
                     )
-                    .setLabel(
-                        'ELO'
-                    )
-                    .setEmoji(
-                        '🔴'
-                    )
+                    .setLabel('ELO')
+                    .setEmoji('🔴')
                     .setStyle(
                         ButtonStyle.Danger
                     )
@@ -1447,44 +967,34 @@ function scrimTypeButtons() {
     ];
 }
 
-function scrimPositionEmbed(
-    scrim
-) {
+function scrimPositionEmbed(scrim) {
     const positionLines =
         SCRIM_POSITIONS
-            .map(
-                position => {
-                    const players =
-                        getPositionPlayers(
-                            scrim,
-                            position
-                        );
-
-                    const names =
-                        players.length >
-                        0
-                            ? players
-                                .map(
-                                    player =>
-                                        `<@${player.id}>`
-                                )
-                                .join(
-                                    ', '
-                                )
-                            : '`— empty —`';
-
-                    return (
-                        `${scrimPositionEmoji(position)} **${position}** — ${names}`
+            .map(position => {
+                const players =
+                    getPositionPlayers(
+                        scrim,
+                        position
                     );
-                }
-            )
-            .join(
-                '\n'
-            );
+
+                const names =
+                    players.length > 0
+                        ? players
+                            .map(
+                                player =>
+                                    `<@${player.id}>`
+                            )
+                            .join(', ')
+                        : '`— empty —`';
+
+                return (
+                    `${scrimPositionEmoji(position)} **${position}** — ${names}`
+                );
+            })
+            .join('\n');
 
     const queue =
-        scrim.players.length >
-        0
+        scrim.players.length > 0
             ? scrim.players
                 .map(
                     (
@@ -1493,21 +1003,16 @@ function scrimPositionEmbed(
                     ) =>
                         `**${String(index + 1).padStart(2, '0')}.** <@${player.id}> • **${player.position}**`
                 )
-                .join(
-                    '\n'
-                )
+                .join('\n')
             : '`Waiting for players...`';
 
     const countdown =
-        scrimCountdownText(
-            scrim
-        );
+        scrimCountdownText(scrim);
 
     const embed =
         new EmbedBuilder()
             .setColor(
-                scrim.type ===
-                    'elo'
+                scrim.type === 'elo'
                     ? RED
                     : GREEN
             )
@@ -1538,36 +1043,28 @@ function scrimPositionEmbed(
             .addFields({
                 name:
                     '🔗 SERVER',
-
                 value:
                     scrim.serverLink
                         ? `[🔗 Join Server](${scrim.serverLink})`
                         : '🔒 Host has not added a server link yet.',
-
-                inline:
-                    false
+                inline: false
             })
             .setFooter({
                 text:
                     '✦ 5 PLAYERS WILL BE RANDOMLY SELECTED • A U R E O N ✦'
             });
 
-    if (
-        /^https?:\/\/\S+$/i.test(
-            BANNER_URL
-        )
-    ) {
-        embed.setImage(
-            BANNER_URL
-        );
+    const banner =
+        getSafeBannerUrl();
+
+    if (banner) {
+        embed.setImage(banner);
     }
 
     return embed;
 }
 
-function scrimPositionButtons(
-    scrim
-) {
+function scrimPositionButtons(scrim) {
     const row1 =
         new ActionRowBuilder()
             .addComponents(
@@ -1581,9 +1078,7 @@ function scrimPositionButtons(
                             'CF'
                         )
                     )
-                    .setEmoji(
-                        '⚽'
-                    )
+                    .setEmoji('⚽')
                     .setStyle(
                         ButtonStyle.Primary
                     ),
@@ -1598,9 +1093,7 @@ function scrimPositionButtons(
                             'CM'
                         )
                     )
-                    .setEmoji(
-                        '🎯'
-                    )
+                    .setEmoji('🎯')
                     .setStyle(
                         ButtonStyle.Primary
                     ),
@@ -1615,9 +1108,7 @@ function scrimPositionButtons(
                             'GK'
                         )
                     )
-                    .setEmoji(
-                        '🧤'
-                    )
+                    .setEmoji('🧤')
                     .setStyle(
                         ButtonStyle.Primary
                     )
@@ -1636,9 +1127,7 @@ function scrimPositionButtons(
                             'RW'
                         )
                     )
-                    .setEmoji(
-                        '🏃'
-                    )
+                    .setEmoji('🏃')
                     .setStyle(
                         ButtonStyle.Primary
                     ),
@@ -1653,9 +1142,7 @@ function scrimPositionButtons(
                             'LW'
                         )
                     )
-                    .setEmoji(
-                        '💨'
-                    )
+                    .setEmoji('💨')
                     .setStyle(
                         ButtonStyle.Primary
                     )
@@ -1668,12 +1155,8 @@ function scrimPositionButtons(
                     .setCustomId(
                         `scrim_leave:${scrim.messageId}`
                     )
-                    .setLabel(
-                        'LEAVE'
-                    )
-                    .setEmoji(
-                        '↩️'
-                    )
+                    .setLabel('LEAVE')
+                    .setEmoji('↩️')
                     .setStyle(
                         ButtonStyle.Secondary
                     ),
@@ -1685,9 +1168,7 @@ function scrimPositionButtons(
                     .setLabel(
                         'SERVER LINK'
                     )
-                    .setEmoji(
-                        '🔗'
-                    )
+                    .setEmoji('🔗')
                     .setStyle(
                         ButtonStyle.Primary
                     ),
@@ -1696,12 +1177,8 @@ function scrimPositionButtons(
                     .setCustomId(
                         `scrim_close:${scrim.messageId}`
                     )
-                    .setLabel(
-                        'CLOSE'
-                    )
-                    .setEmoji(
-                        '❌'
-                    )
+                    .setLabel('CLOSE')
+                    .setEmoji('❌')
                     .setStyle(
                         ButtonStyle.Danger
                     )
@@ -1714,14 +1191,10 @@ function scrimPositionButtons(
     ];
 }
 
-function scrimRandomEmbed(
-    scrim
-) {
+function scrimRandomEmbed(scrim) {
     const embed =
         new EmbedBuilder()
-            .setColor(
-                GOLD
-            )
+            .setColor(GOLD)
             .setAuthor({
                 name:
                     '✦ A U R E O N • S C R I M ✦'
@@ -1748,37 +1221,29 @@ function scrimRandomEmbed(
                     '✦ RANDOM PICK • A U R E O N ✦'
             });
 
-    if (
-        /^https?:\/\/\S+$/i.test(
-            BANNER_URL
-        )
-    ) {
-        embed.setImage(
-            BANNER_URL
-        );
+    const banner =
+        getSafeBannerUrl();
+
+    if (banner) {
+        embed.setImage(banner);
     }
 
     return embed;
 }
 
-function scrimReadyEmbed(
-    scrim
-) {
+function scrimReadyEmbed(scrim) {
     const selectedLines =
         scrim.selected
             .map(
                 player =>
                     `${scrimPositionEmoji(player.position)} **${player.position}**  •  <@${player.id}>`
             )
-            .join(
-                '\n'
-            );
+            .join('\n');
 
     const embed =
         new EmbedBuilder()
             .setColor(
-                scrim.type ===
-                    'elo'
+                scrim.type === 'elo'
                     ? RED
                     : GREEN
             )
@@ -1800,36 +1265,28 @@ function scrimReadyEmbed(
             .addFields({
                 name:
                     '🔗 SERVER LINK',
-
                 value:
                     scrim.serverLink
                         ? `[🔗 JOIN SERVER](${scrim.serverLink})`
                         : '🔒 Host has not added the server link yet.',
-
-                inline:
-                    false
+                inline: false
             })
             .setFooter({
                 text:
                     '✦ 5 / 5 PLAYERS • A U R E O N • E U ✦'
             });
 
-    if (
-        /^https?:\/\/\S+$/i.test(
-            BANNER_URL
-        )
-    ) {
-        embed.setImage(
-            BANNER_URL
-        );
+    const banner =
+        getSafeBannerUrl();
+
+    if (banner) {
+        embed.setImage(banner);
     }
 
     return embed;
 }
 
-function scrimReadyButtons(
-    scrim
-) {
+function scrimReadyButtons(scrim) {
     return [
         new ActionRowBuilder()
             .addComponents(
@@ -1840,9 +1297,7 @@ function scrimReadyButtons(
                     .setLabel(
                         'SERVER LINK'
                     )
-                    .setEmoji(
-                        '🔗'
-                    )
+                    .setEmoji('🔗')
                     .setStyle(
                         ButtonStyle.Primary
                     ),
@@ -1851,12 +1306,8 @@ function scrimReadyButtons(
                     .setCustomId(
                         `scrim_close:${scrim.messageId}`
                     )
-                    .setLabel(
-                        'CLOSE'
-                    )
-                    .setEmoji(
-                        '❌'
-                    )
+                    .setLabel('CLOSE')
+                    .setEmoji('❌')
                     .setStyle(
                         ButtonStyle.Danger
                     )
@@ -1864,18 +1315,14 @@ function scrimReadyButtons(
     ];
 }
 
-async function updateScrimMessage(
-    scrim
-) {
+async function updateScrimMessage(scrim) {
     try {
         const channel =
             await client.channels.fetch(
                 scrim.channelId
             );
 
-        if (
-            !channel
-        ) {
+        if (!channel) {
             return;
         }
 
@@ -1884,21 +1331,16 @@ async function updateScrimMessage(
                 scrim.messageId
             );
 
-        if (
-            !message
-        ) {
+        if (!message) {
             return;
         }
 
         if (
-            scrim.phase ===
-            'choose'
+            scrim.phase === 'choose'
         ) {
             await message.edit({
                 embeds: [
-                    scrimChooseEmbed(
-                        scrim
-                    )
+                    scrimChooseEmbed(scrim)
                 ],
                 components:
                     scrimTypeButtons()
@@ -1908,62 +1350,44 @@ async function updateScrimMessage(
         }
 
         if (
-            scrim.phase ===
-            'queue'
+            scrim.phase === 'queue'
         ) {
             await message.edit({
                 embeds: [
-                    scrimPositionEmbed(
-                        scrim
-                    )
+                    scrimPositionEmbed(scrim)
                 ],
                 components:
-                    scrimPositionButtons(
-                        scrim
-                    )
+                    scrimPositionButtons(scrim)
             });
 
             return;
         }
 
         if (
-            scrim.phase ===
-            'picking'
+            scrim.phase === 'picking'
         ) {
             await message.edit({
                 embeds: [
-                    scrimRandomEmbed(
-                        scrim
-                    )
+                    scrimRandomEmbed(scrim)
                 ],
-
-                components:
-                    []
+                components: []
             });
 
             return;
         }
 
         if (
-            scrim.phase ===
-            'ready'
+            scrim.phase === 'ready'
         ) {
             await message.edit({
                 embeds: [
-                    scrimReadyEmbed(
-                        scrim
-                    )
+                    scrimReadyEmbed(scrim)
                 ],
-
                 components:
-                    scrimReadyButtons(
-                        scrim
-                    )
+                    scrimReadyButtons(scrim)
             });
         }
-    } catch (
-        error
-    ) {
+    } catch (error) {
         console.log(
             'Scrim update error:',
             error.message
@@ -1971,30 +1395,23 @@ async function updateScrimMessage(
     }
 }
 
-async function pingScrimRole(
-    scrim
-) {
+async function pingScrimRole(scrim) {
     try {
         const channel =
             await client.channels.fetch(
                 scrim.channelId
             );
 
-        if (
-            !channel
-        ) {
+        if (!channel) {
             return;
         }
 
         const roleId =
-            scrim.type ===
-            'friendly'
+            scrim.type === 'friendly'
                 ? FRIENDLY_SCRIM_PING_ROLE_ID
                 : ELO_SCRIM_PING_ROLE_ID;
 
-        if (
-            !roleId
-        ) {
+        if (!roleId) {
             return;
         }
 
@@ -2010,9 +1427,7 @@ async function pingScrimRole(
                 ]
             }
         });
-    } catch (
-        error
-    ) {
+    } catch (error) {
         console.log(
             'Scrim ping error:',
             error.message
@@ -2020,24 +1435,18 @@ async function pingScrimRole(
     }
 }
 
-async function startScrimCountdownIfReady(
-    scrim
-) {
+async function startScrimCountdownIfReady(scrim) {
     if (
         !scrim ||
-        scrim.phase !==
-            'queue'
+        scrim.phase !== 'queue'
     ) {
         return false;
     }
 
     if (
-        !allPositionsCovered(
-            scrim
-        )
+        !allPositionsCovered(scrim)
     ) {
-        scrim.countdownEndTime =
-            null;
+        scrim.countdownEndTime = null;
 
         return false;
     }
@@ -2057,34 +1466,26 @@ async function startScrimCountdownIfReady(
     return true;
 }
 
-async function startScrimRandomPick(
-    scrim
-) {
+async function startScrimRandomPick(scrim) {
     if (
         !scrim ||
-        scrim.phase !==
-            'queue' ||
+        scrim.phase !== 'queue' ||
         scrim.picking
     ) {
         return;
     }
 
     if (
-        !allPositionsCovered(
-            scrim
-        )
+        !allPositionsCovered(scrim)
     ) {
         return;
     }
 
-    scrim.picking =
-        true;
+    scrim.picking = true;
 
-    scrim.phase =
-        'picking';
+    scrim.phase = 'picking';
 
-    scrim.countdownEndTime =
-        null;
+    scrim.countdownEndTime = null;
 
     await updateScrimMessage(
         scrim
@@ -2100,12 +1501,9 @@ async function startScrimRandomPick(
     );
 }
 
-async function finalizeScrimRandomPick(
-    scrim
-) {
+async function finalizeScrimRandomPick(scrim) {
     try {
-        const selected =
-            [];
+        const selected = [];
 
         for (
             const position
@@ -2118,17 +1516,11 @@ async function finalizeScrimRandomPick(
                 );
 
             if (
-                candidates.length ===
-                0
+                candidates.length === 0
             ) {
-                scrim.phase =
-                    'queue';
-
-                scrim.picking =
-                    false;
-
-                scrim.countdownEndTime =
-                    null;
+                scrim.phase = 'queue';
+                scrim.picking = false;
+                scrim.countdownEndTime = null;
 
                 await updateScrimMessage(
                     scrim
@@ -2144,39 +1536,31 @@ async function finalizeScrimRandomPick(
                 );
 
             selected.push(
-                candidates[
-                    randomIndex
-                ]
+                candidates[randomIndex]
             );
         }
 
-        scrim.selected =
-            selected;
+        scrim.selected = selected;
 
-        scrim.phase =
-            'ready';
+        scrim.phase = 'ready';
 
-        scrim.picking =
-            false;
+        scrim.picking = false;
 
         await updateScrimMessage(
             scrim
         );
-    } catch (
-        error
-    ) {
-        scrim.phase =
-            'queue';
-
-        scrim.picking =
-            false;
-
-        scrim.countdownEndTime =
-            null;
+    } catch (error) {
+        scrim.phase = 'queue';
+        scrim.picking = false;
+        scrim.countdownEndTime = null;
 
         console.log(
             'Scrim finalize error:',
             error.message
+        );
+
+        await updateScrimMessage(
+            scrim
         );
     }
 }
@@ -2191,21 +1575,17 @@ setInterval(
             const [
                 messageId,
                 scrim
-            ]
-            of scrims
+            ] of scrims
         ) {
             if (
                 !scrim ||
-                scrim.phase !==
-                    'queue'
+                scrim.phase !== 'queue'
             ) {
                 continue;
             }
 
             if (
-                !allPositionsCovered(
-                    scrim
-                )
+                !allPositionsCovered(scrim)
             ) {
                 if (
                     scrim.countdownEndTime
@@ -2262,9 +1642,7 @@ function resultEmbed(
     preview = false
 ) {
     return new EmbedBuilder()
-        .setColor(
-            GOLD
-        )
+        .setColor(GOLD)
         .setAuthor({
             name:
                 '✦ A U R E O N • T R Y O U T ✦'
@@ -2281,85 +1659,57 @@ function resultEmbed(
             {
                 name:
                     '🎯 SHOOTING',
-
                 value:
                     `**${stats.shooting}** / 100`,
-
-                inline:
-                    true
+                inline: true
             },
-
             {
                 name:
                     '⚽ PASSING',
-
                 value:
                     `**${stats.passing}** / 100`,
-
-                inline:
-                    true
+                inline: true
             },
-
             {
                 name:
                     '🤝 TEAMWORK',
-
                 value:
                     `**${stats.teamwork}** / 100`,
-
-                inline:
-                    true
+                inline: true
             },
-
             {
                 name:
                     '🧤 GK',
-
                 value:
                     `**${stats.gk}** / 100`,
-
-                inline:
-                    true
+                inline: true
             },
-
             {
                 name:
                     '🏆 OVERALL',
-
                 value:
                     `**${stats.overall} OVR**`,
-
-                inline:
-                    true
+                inline: true
             },
-
             {
                 name:
                     '◇ RANK',
-
                 value:
                     `**${stats.rank}**`,
-
-                inline:
-                    true
+                inline: true
             },
-
             {
                 name:
                     '📝 THINGS TO FIX',
-
                 value:
                     stats.thingsToFix ||
                     'Nothing specific noted.',
-
-                inline:
-                    false
+                inline: false
             }
         )
         .setThumbnail(
             user.displayAvatarURL({
-                size:
-                    256
+                size: 256
             })
         )
         .setFooter({
@@ -2392,27 +1742,16 @@ function resultModal(
             required = true
         ) =>
             new TextInputBuilder()
-                .setCustomId(
-                    id
-                )
-                .setLabel(
-                    label
-                )
-                .setStyle(
-                    style
-                )
-                .setRequired(
-                    required
-                )
+                .setCustomId(id)
+                .setLabel(label)
+                .setStyle(style)
+                .setRequired(required)
                 .setMaxLength(
-                    id ===
-                        'thingsToFix'
+                    id === 'thingsToFix'
                         ? 1000
                         : 3
                 )
-                .setValue(
-                    value
-                );
+                .setValue(value);
 
     modal.addComponents(
         new ActionRowBuilder()
@@ -2421,8 +1760,7 @@ function resultModal(
                     'shooting',
                     'Shooting (0-100)',
                     TextInputStyle.Short,
-                    existing?.shooting !==
-                        undefined
+                    existing?.shooting !== undefined
                         ? String(
                             existing.shooting
                         )
@@ -2436,8 +1774,7 @@ function resultModal(
                     'passing',
                     'Passing (0-100)',
                     TextInputStyle.Short,
-                    existing?.passing !==
-                        undefined
+                    existing?.passing !== undefined
                         ? String(
                             existing.passing
                         )
@@ -2451,8 +1788,7 @@ function resultModal(
                     'teamwork',
                     'Teamwork (0-100)',
                     TextInputStyle.Short,
-                    existing?.teamwork !==
-                        undefined
+                    existing?.teamwork !== undefined
                         ? String(
                             existing.teamwork
                         )
@@ -2466,8 +1802,7 @@ function resultModal(
                     'gk',
                     'GK (0-100)',
                     TextInputStyle.Short,
-                    existing?.gk !==
-                        undefined
+                    existing?.gk !== undefined
                         ? String(
                             existing.gk
                         )
@@ -2481,8 +1816,7 @@ function resultModal(
                     'thingsToFix',
                     'Things to Fix',
                     TextInputStyle.Paragraph,
-                    existing?.thingsToFix ||
-                        '',
+                    existing?.thingsToFix || '',
                     false
                 )
             )
@@ -2491,9 +1825,7 @@ function resultModal(
     return modal;
 }
 
-function resultPreviewButtons(
-    playerId
-) {
+function resultPreviewButtons(playerId) {
     return [
         new ActionRowBuilder()
             .addComponents(
@@ -2504,9 +1836,7 @@ function resultPreviewButtons(
                     .setLabel(
                         'EDIT STATS'
                     )
-                    .setEmoji(
-                        '✏️'
-                    )
+                    .setEmoji('✏️')
                     .setStyle(
                         ButtonStyle.Secondary
                     ),
@@ -2515,12 +1845,8 @@ function resultPreviewButtons(
                     .setCustomId(
                         `result_finish:${playerId}`
                     )
-                    .setLabel(
-                        'FINISH'
-                    )
-                    .setEmoji(
-                        '✅'
-                    )
+                    .setLabel('FINISH')
+                    .setEmoji('✅')
                     .setStyle(
                         ButtonStyle.Success
                     )
@@ -2537,12 +1863,7 @@ function getLeaderboardEntries() {
         resultsDatabase
     )
         .map(
-            (
-                [
-                    userId,
-                    raw
-                ]
-            ) => {
+            ([userId, raw]) => {
                 const data =
                     normalizePlayerData(
                         raw
@@ -2550,15 +1871,12 @@ function getLeaderboardEntries() {
 
                 if (
                     !data ||
-                    data.tryoutsCompleted <
-                        1
+                    data.tryoutsCompleted < 1
                 ) {
                     return null;
                 }
 
-                resultsDatabase[
-                    userId
-                ] =
+                resultsDatabase[userId] =
                     data;
 
                 return {
@@ -2567,14 +1885,9 @@ function getLeaderboardEntries() {
                 };
             }
         )
-        .filter(
-            Boolean
-        )
+        .filter(Boolean)
         .sort(
-            (
-                a,
-                b
-            ) => {
+            (a, b) => {
                 if (
                     b.data.overall !==
                     a.data.overall
@@ -2606,20 +1919,15 @@ function getLeaderboardEntries() {
                 }
 
                 return String(
-                    b.data.updatedAt ||
-                    ''
+                    b.data.updatedAt || ''
                 ).localeCompare(
                     String(
-                        a.data.updatedAt ||
-                        ''
+                        a.data.updatedAt || ''
                     )
                 );
             }
         )
-        .slice(
-            0,
-            10
-        );
+        .slice(0, 10);
 }
 
 function buildLeaderboardEmbed() {
@@ -2627,13 +1935,10 @@ function buildLeaderboardEmbed() {
         getLeaderboardEntries();
 
     if (
-        entries.length ===
-        0
+        entries.length === 0
     ) {
         return new EmbedBuilder()
-            .setColor(
-                GOLD
-            )
+            .setColor(GOLD)
             .setAuthor({
                 name:
                     '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍 • ᴇᴜ'
@@ -2653,43 +1958,29 @@ function buildLeaderboardEmbed() {
     let description =
         '✦ **TOP 10 PLAYERS** ✦\n\n';
 
-    const medals =
-        [
-            '🥇',
-            '🥈',
-            '🥉'
-        ];
+    const medals = [
+        '🥇',
+        '🥈',
+        '🥉'
+    ];
 
     entries.forEach(
-        (
-            entry,
-            index
-        ) => {
-            if (
-                index <
-                3
-            ) {
+        (entry, index) => {
+            if (index < 3) {
                 description +=
                     `${medals[index]} **TOP ${index + 1}**\n` +
                     `> <@${entry.userId}>\n` +
                     `> ◈ **${entry.data.overall} OVR**\n`;
 
-                if (
-                    index ===
-                    0
-                ) {
+                if (index === 0) {
                     description +=
                         `> TRYOUTS    **${entry.data.tryoutsCompleted}**\n` +
                         `> BEST OVR   **${entry.data.bestOVR}**\n`;
                 }
 
-                description +=
-                    '\n';
+                description += '\n';
             } else {
-                if (
-                    index ===
-                    3
-                ) {
+                if (index === 3) {
                     description +=
                         '━━━━━━━━━━━━━━━━━━━━━━━━\n\n';
                 }
@@ -2701,9 +1992,7 @@ function buildLeaderboardEmbed() {
     );
 
     return new EmbedBuilder()
-        .setColor(
-            GOLD
-        )
+        .setColor(GOLD)
         .setAuthor({
             name:
                 '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍 • ᴇᴜ'
@@ -2720,9 +2009,7 @@ function buildLeaderboardEmbed() {
         });
 }
 
-function buildProfileEmbed(
-    userId
-) {
+function buildProfileEmbed(userId) {
     const data =
         getStoredPlayerData(
             userId
@@ -2730,16 +2017,13 @@ function buildProfileEmbed(
 
     if (
         !data ||
-        data.tryoutsCompleted <
-            1
+        data.tryoutsCompleted < 1
     ) {
         return null;
     }
 
     return new EmbedBuilder()
-        .setColor(
-            GOLD
-        )
+        .setColor(GOLD)
         .setAuthor({
             name:
                 '✦ A U R E O N • PLAYER PROFILE ✦'
@@ -2754,87 +2038,52 @@ function buildProfileEmbed(
             {
                 name:
                     'TRYOUTS',
-
                 value:
                     `**${data.tryoutsCompleted}**`,
-
-                inline:
-                    true
+                inline: true
             },
-
             {
                 name:
                     'BEST OVR',
-
                 value:
                     `**${data.bestOVR}**`,
-
-                inline:
-                    true
+                inline: true
             },
-
             {
                 name:
                     '🎯 SHOOTING',
-
                 value:
-                    String(
-                        data.shooting
-                    ),
-
-                inline:
-                    true
+                    String(data.shooting),
+                inline: true
             },
-
             {
                 name:
                     '⚽ PASSING',
-
                 value:
-                    String(
-                        data.passing
-                    ),
-
-                inline:
-                    true
+                    String(data.passing),
+                inline: true
             },
-
             {
                 name:
                     '🤝 TEAMWORK',
-
                 value:
-                    String(
-                        data.teamwork
-                    ),
-
-                inline:
-                    true
+                    String(data.teamwork),
+                inline: true
             },
-
             {
                 name:
                     '🧤 GK',
-
                 value:
-                    String(
-                        data.gk
-                    ),
-
-                inline:
-                    true
+                    String(data.gk),
+                inline: true
             },
-
             {
                 name:
                     '📝 THINGS TO FIX',
-
                 value:
                     data.thingsToFix ||
                     'None noted.',
-
-                inline:
-                    false
+                inline: false
             }
         )
         .setFooter({
@@ -2871,22 +2120,15 @@ function announcementModal() {
                         .setStyle(
                             TextInputStyle.Paragraph
                         )
-                        .setRequired(
-                            false
-                        )
-                        .setMaxLength(
-                            1000
-                        )
+                        .setRequired(false)
+                        .setMaxLength(1000)
                 )
         );
 }
 
-function announcementPlayerList(
-    a
-) {
+function announcementPlayerList(a) {
     if (
-        a.ready.length ===
-        0
+        a.ready.length === 0
     ) {
         return (
             '› Waiting for players...'
@@ -2895,20 +2137,13 @@ function announcementPlayerList(
 
     return a.ready
         .map(
-            (
-                id,
-                index
-            ) =>
+            (id, index) =>
                 `**${String(index + 1).padStart(2, '0')}.** <@${id}>`
         )
-        .join(
-            '\n'
-        );
+        .join('\n');
 }
 
-function announcementProgress(
-    a
-) {
+function announcementProgress(a) {
     const count =
         Math.min(
             MAX_PLAYERS,
@@ -2916,22 +2151,16 @@ function announcementProgress(
         );
 
     return (
-        '▰'.repeat(
-            count
-        ) +
+        '▰'.repeat(count) +
         '▱'.repeat(
-            MAX_PLAYERS -
-            count
+            MAX_PLAYERS - count
         )
     );
 }
 
-function announcementEmbed(
-    a
-) {
+function announcementEmbed(a) {
     const remaining =
-        a.phase ===
-            'extension'
+        a.phase === 'extension'
             ? timeLeft(
                 a.extensionEndTime -
                 Date.now()
@@ -2945,8 +2174,7 @@ function announcementEmbed(
         '✦ ʟᴏʙʙʏ ᴏᴘᴇɴ';
 
     if (
-        a.phase ===
-        'extension'
+        a.phase === 'extension'
     ) {
         title =
             '✦ ⚠️ ᴇxᴛᴇɴsɪᴏɴ';
@@ -2967,56 +2195,40 @@ function announcementEmbed(
         '**READY PLAYERS**\n' +
         `${announcementPlayerList(a)}`;
 
-    if (
-        a.customMessage
-    ) {
+    if (a.customMessage) {
         description +=
             `\n\n💬 **MESSAGE**\n${a.customMessage}`;
     }
 
     return new EmbedBuilder()
-        .setColor(
-            GOLD
-        )
+        .setColor(GOLD)
         .setAuthor({
             name:
                 '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍 • ᴇᴜ'
         })
-        .setTitle(
-            title
-        )
-        .setDescription(
-            description
-        )
+        .setTitle(title)
+        .setDescription(description)
         .addFields(
             {
                 name:
                     'TIME',
-
                 value:
                     `**${formatTime(
                         a.unit,
                         a.amount
                     )}**`,
-
-                inline:
-                    true
+                inline: true
             },
-
             {
                 name:
                     'STATUS',
-
                 value:
-                    a.phase ===
-                        'extension'
+                    a.phase === 'extension'
                         ? '⚠️ Extension active'
                         : a.warningSent
                             ? '⚠️ Closing soon'
                             : '🟢 Open',
-
-                inline:
-                    true
+                inline: true
             }
         )
         .setFooter({
@@ -3025,9 +2237,7 @@ function announcementEmbed(
         });
 }
 
-function announcementButtons(
-    a
-) {
+function announcementButtons(a) {
     const row = [
         new ButtonBuilder()
             .setCustomId(
@@ -3036,9 +2246,7 @@ function announcementButtons(
             .setLabel(
                 `READY ${a.ready.length}/${MAX_PLAYERS}`
             )
-            .setEmoji(
-                '⚡'
-            )
+            .setEmoji('⚡')
             .setStyle(
                 ButtonStyle.Success
             )
@@ -3054,9 +2262,7 @@ function announcementButtons(
             .setLabel(
                 'NOT READY'
             )
-            .setEmoji(
-                '↩️'
-            )
+            .setEmoji('↩️')
             .setStyle(
                 ButtonStyle.Secondary
             )
@@ -3064,17 +2270,14 @@ function announcementButtons(
 
     if (
         a.warningSent ||
-        a.phase ===
-            'extension'
+        a.phase === 'extension'
     ) {
         row.push(
             new ButtonBuilder()
                 .setCustomId(
                     `announcement_reping:${a.messageId}`
                 )
-                .setLabel(
-                    'RE-PING'
-                )
+                .setLabel('RE-PING')
                 .setStyle(
                     ButtonStyle.Primary
                 )
@@ -3086,24 +2289,18 @@ function announcementButtons(
 
     return [
         new ActionRowBuilder()
-            .addComponents(
-                row
-            )
+            .addComponents(row)
     ];
 }
 
-async function updateAnnouncement(
-    a
-) {
+async function updateAnnouncement(a) {
     try {
         const channel =
             await client.channels.fetch(
                 a.channelId
             );
 
-        if (
-            !channel
-        ) {
+        if (!channel) {
             return;
         }
 
@@ -3112,27 +2309,19 @@ async function updateAnnouncement(
                 a.messageId
             );
 
-        if (
-            !message
-        ) {
+        if (!message) {
             return;
         }
 
         await message.edit({
             embeds: [
-                announcementEmbed(
-                    a
-                )
+                announcementEmbed(a)
             ],
 
             components:
-                announcementButtons(
-                    a
-                )
+                announcementButtons(a)
         });
-    } catch (
-        error
-    ) {
+    } catch (error) {
         console.log(
             'Announcement update error:',
             error.message
@@ -3140,9 +2329,7 @@ async function updateAnnouncement(
     }
 }
 
-async function sendHostReminderDM(
-    a
-) {
+async function sendHostReminderDM(a) {
     try {
         const user =
             await client.users.fetch(
@@ -3152,9 +2339,7 @@ async function sendHostReminderDM(
         await user.send({
             embeds: [
                 new EmbedBuilder()
-                    .setColor(
-                        GOLD
-                    )
+                    .setColor(GOLD)
                     .setAuthor({
                         name:
                             '✦ A U R E O N • E U ✦'
@@ -3194,9 +2379,7 @@ async function sendHostReminderDM(
                     )
             ]
         });
-    } catch (
-        error
-    ) {
+    } catch (error) {
         console.log(
             'Host DM error:',
             error.message
@@ -3214,9 +2397,7 @@ async function pingTryoutRole(
                 a.channelId
             );
 
-        if (
-            !channel
-        ) {
+        if (!channel) {
             return;
         }
 
@@ -3233,8 +2414,7 @@ async function pingTryoutRole(
                     `✦ **AUREON TRYOUT ${state}**\n**${a.ready.length}/${MAX_PLAYERS}** players are ready.`,
 
                 allowedMentions: {
-                    parse:
-                        []
+                    parse: []
                 }
             });
 
@@ -3253,9 +2433,7 @@ async function pingTryoutRole(
                 ]
             }
         });
-    } catch (
-        error
-    ) {
+    } catch (error) {
         console.log(
             'Ping error:',
             error.message
@@ -3267,14 +2445,11 @@ async function finishAnnouncement(
     a,
     reason
 ) {
-    if (
-        a.closed
-    ) {
+    if (a.closed) {
         return;
     }
 
-    a.closed =
-        true;
+    a.closed = true;
 
     try {
         const channel =
@@ -3282,9 +2457,7 @@ async function finishAnnouncement(
                 a.channelId
             );
 
-        if (
-            !channel
-        ) {
+        if (!channel) {
             return;
         }
 
@@ -3292,19 +2465,15 @@ async function finishAnnouncement(
             await channel.messages.fetch(
                 a.messageId
             ).catch(
-                () =>
-                    null
+                () => null
             );
 
-        if (
-            !message
-        ) {
+        if (!message) {
             return;
         }
 
         const isFull =
-            reason ===
-            'full';
+            reason === 'full';
 
         const embed =
             new EmbedBuilder()
@@ -3337,13 +2506,9 @@ async function finishAnnouncement(
             embeds: [
                 embed
             ],
-
-            components:
-                []
+            components: []
         });
-    } catch (
-        error
-    ) {
+    } catch (error) {
         console.log(
             'Close announcement error:',
             error.message
@@ -3361,12 +2526,9 @@ setInterval(
             const [
                 messageId,
                 a
-            ]
-            of announcements
+            ] of announcements
         ) {
-            if (
-                a.closed
-            ) {
+            if (a.closed) {
                 announcements.delete(
                     messageId
                 );
@@ -3394,38 +2556,26 @@ setInterval(
                 Date.now();
 
             if (
-                a.phase ===
-                    'initial' &&
+                a.phase === 'initial' &&
                 !a.warningSent &&
-                a.endTime -
-                    now <=
-                    TWO_MINUTES &&
-                a.endTime -
-                    now > 0
+                a.endTime - now <=
+                TWO_MINUTES &&
+                a.endTime - now > 0
             ) {
-                a.warningSent =
-                    true;
+                a.warningSent = true;
 
-                await updateAnnouncement(
-                    a
-                );
+                await updateAnnouncement(a);
 
-                await sendHostReminderDM(
-                    a
-                );
+                await sendHostReminderDM(a);
 
                 continue;
             }
 
             if (
-                a.phase ===
-                    'initial' &&
-                now >=
-                    a.endTime
+                a.phase === 'initial' &&
+                now >= a.endTime
             ) {
-                if (
-                    a.repingUsed
-                ) {
+                if (a.repingUsed) {
                     a.phase =
                         'extension';
 
@@ -3433,9 +2583,7 @@ setInterval(
                         Date.now() +
                         TWO_MINUTES;
 
-                    await updateAnnouncement(
-                        a
-                    );
+                    await updateAnnouncement(a);
 
                     try {
                         const channel =
@@ -3443,18 +2591,14 @@ setInterval(
                                 a.channelId
                             );
 
-                        if (
-                            channel
-                        ) {
+                        if (channel) {
                             await channel.send({
                                 content:
                                     `<@${a.hostId}>`,
 
                                 embeds: [
                                     new EmbedBuilder()
-                                        .setColor(
-                                            GOLD
-                                        )
+                                        .setColor(GOLD)
                                         .setTitle(
                                             '⚠️ 2-MINUTE EXTENSION'
                                         )
@@ -3476,9 +2620,7 @@ setInterval(
                                 }
                             });
                         }
-                    } catch (
-                        error
-                    ) {
+                    } catch (error) {
                         console.log(
                             'Extension message error:',
                             error.message
@@ -3499,10 +2641,8 @@ setInterval(
             }
 
             if (
-                a.phase ===
-                    'extension' &&
-                now >=
-                    a.extensionEndTime
+                a.phase === 'extension' &&
+                now >= a.extensionEndTime
             ) {
                 await finishAnnouncement(
                     a,
@@ -3531,17 +2671,11 @@ async function assignRankRole(
     rank
 ) {
     const roleId =
-        getRankRoleId(
-            rank
-        );
+        getRankRoleId(rank);
 
-    if (
-        !roleId
-    ) {
+    if (!roleId) {
         return {
-            ok:
-                false,
-
+            ok: false,
             reason:
                 `No role ID configured for rank ${rank}.`
         };
@@ -3549,21 +2683,14 @@ async function assignRankRole(
 
     const member =
         await interaction.guild.members
-            .fetch(
-                playerId
-            )
+            .fetch(playerId)
             .catch(
-                () =>
-                    null
+                () => null
             );
 
-    if (
-        !member
-    ) {
+    if (!member) {
         return {
-            ok:
-                false,
-
+            ok: false,
             reason:
                 'Player is not in this server.'
         };
@@ -3574,17 +2701,12 @@ async function assignRankRole(
         await interaction.guild.members
             .fetchMe()
             .catch(
-                () =>
-                    null
+                () => null
             );
 
-    if (
-        !botMember
-    ) {
+    if (!botMember) {
         return {
-            ok:
-                false,
-
+            ok: false,
             reason:
                 'Could not resolve the bot member.'
         };
@@ -3595,13 +2717,9 @@ async function assignRankRole(
             roleId
         );
 
-    if (
-        !rankRole
-    ) {
+    if (!rankRole) {
         return {
-            ok:
-                false,
-
+            ok: false,
             reason:
                 `Configured ${rank} role was not found.`
         };
@@ -3610,13 +2728,10 @@ async function assignRankRole(
     if (
         rankRole.managed ||
         rankRole.position >=
-            botMember.roles.highest
-                .position
+        botMember.roles.highest.position
     ) {
         return {
-            ok:
-                false,
-
+            ok: false,
             reason:
                 `Bot role hierarchy is too low for ${rankRole.name}.`
         };
@@ -3625,9 +2740,7 @@ async function assignRankRole(
     const allRankRoleIds =
         Object.values(
             RANK_ROLE_IDS
-        ).filter(
-            Boolean
-        );
+        ).filter(Boolean);
 
     try {
         const oldRankRoles =
@@ -3638,9 +2751,7 @@ async function assignRankRole(
                     )
             );
 
-        if (
-            oldRankRoles.size
-        ) {
+        if (oldRankRoles.size) {
             await member.roles.remove(
                 oldRankRoles
             );
@@ -3651,27 +2762,180 @@ async function assignRankRole(
         );
 
         return {
-            ok:
-                true,
-
+            ok: true,
             roleName:
                 rankRole.name
         };
-    } catch (
-        error
-    ) {
+    } catch (error) {
         console.error(
             '❌ Rank role assignment failed:',
             error
         );
 
         return {
-            ok:
-                false,
-
+            ok: false,
             reason:
                 error.message
         };
+    }
+}
+
+/* =========================================================
+   AUTO REGISTER /TRYOUT SCRIM
+========================================================= */
+
+async function ensureScrimSubcommandRegistered() {
+    try {
+        if (!client.user) {
+            return;
+        }
+
+        console.log(
+            '🔎 Checking /tryout scrim registration...'
+        );
+
+        let foundTryoutCommand = false;
+
+        for (
+            const guild
+            of client.guilds.cache.values()
+        ) {
+            try {
+                const commands =
+                    await guild.commands.fetch();
+
+                const tryoutCommand =
+                    commands.find(
+                        command =>
+                            command.name ===
+                            'tryout'
+                    );
+
+                if (!tryoutCommand) {
+                    continue;
+                }
+
+                foundTryoutCommand = true;
+
+                const existingOptions =
+                    Array.isArray(
+                        tryoutCommand.options
+                    )
+                        ? tryoutCommand.options
+                        : [];
+
+                const hasScrim =
+                    existingOptions.some(
+                        option =>
+                            option.type === 1 &&
+                            option.name ===
+                            'scrim'
+                    );
+
+                if (hasScrim) {
+                    console.log(
+                        `✅ /tryout scrim already registered in ${guild.name}`
+                    );
+
+                    continue;
+                }
+
+                const convertedOptions =
+                    existingOptions.map(
+                        option => {
+                            const data = {
+                                type:
+                                    option.type,
+
+                                name:
+                                    option.name,
+
+                                description:
+                                    option.description
+                            };
+
+                            if (
+                                option.required !==
+                                undefined
+                            ) {
+                                data.required =
+                                    option.required;
+                            }
+
+                            if (
+                                Array.isArray(
+                                    option.choices
+                                ) &&
+                                option.choices.length
+                            ) {
+                                data.choices =
+                                    option.choices.map(
+                                        choice => ({
+                                            name:
+                                                choice.name,
+                                            value:
+                                                choice.value
+                                        })
+                                    );
+                            }
+
+                            if (
+                                Array.isArray(
+                                    option.options
+                                ) &&
+                                option.options.length
+                            ) {
+                                data.options =
+                                    option.options;
+                            }
+
+                            return data;
+                        }
+                    );
+
+                convertedOptions.push({
+                    type: 1,
+                    name: 'scrim',
+                    description:
+                        'Create a Friendly or ELO scrim.'
+                });
+
+                await guild.commands.edit(
+                    tryoutCommand.id,
+                    {
+                        name:
+                            tryoutCommand.name,
+
+                        description:
+                            tryoutCommand.description ||
+                            'AUREON tryout system',
+
+                        options:
+                            convertedOptions
+                    }
+                );
+
+                console.log(
+                    `✅ Added /tryout scrim to ${guild.name}`
+                );
+            } catch (guildError) {
+                console.error(
+                    `❌ Could not update commands in ${guild.name}:`,
+                    guildError.message
+                );
+            }
+        }
+
+        if (!foundTryoutCommand) {
+            console.log(
+                '⚠️ No guild-level /tryout command was found. Your deploy-commands.js may need to register /tryout.'
+            );
+        }
+    } catch (error) {
+        console.error(
+            '❌ Automatic /tryout scrim registration failed:',
+            error
+        );
     }
 }
 
@@ -3681,7 +2945,7 @@ async function assignRankRole(
 
 client.once(
     'clientReady',
-    readyClient => {
+    async readyClient => {
         console.log(
             `✅ Logged in as ${readyClient.user.tag}`
         );
@@ -3738,9 +3002,7 @@ client.once(
             `🏆 Rank Roles: ${
                 Object.values(
                     RANK_ROLE_IDS
-                ).every(
-                    Boolean
-                )
+                ).every(Boolean)
                     ? 'CONFIGURED'
                     : 'INCOMPLETE'
             }`
@@ -3768,6 +3030,13 @@ client.once(
         );
 
         updatePresence();
+
+        /*
+         * Important fix:
+         * Make sure the existing /tryout command contains
+         * the scrim subcommand.
+         */
+        await ensureScrimSubcommandRegistered();
     }
 );
 
@@ -3801,8 +3070,7 @@ client.on(
                 ================================================= */
 
                 if (
-                    subcommand ===
-                    'scrim'
+                    subcommand === 'scrim'
                 ) {
                     if (
                         !isTryoutHoster(
@@ -3812,7 +3080,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ You must be a **Tryout Hoster** to create a scrim.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -3836,25 +3103,19 @@ client.on(
                                 interaction.user.id
                         );
 
-                    if (
-                        existingTryout
-                    ) {
+                    if (existingTryout) {
                         return interaction.reply({
                             content:
                                 '❌ You already have an active tryout lobby.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
                     }
 
-                    if (
-                        existingScrim
-                    ) {
+                    if (existingScrim) {
                         return interaction.reply({
                             content:
                                 '❌ You already have an active scrim.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -3922,7 +3183,6 @@ client.on(
                     return interaction.reply({
                         content:
                             '✅ Scrim setup created.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -3933,8 +3193,7 @@ client.on(
                 ================================================= */
 
                 if (
-                    subcommand ===
-                    'create'
+                    subcommand === 'create'
                 ) {
                     if (
                         !isTryoutHoster(
@@ -3944,7 +3203,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ You must be a **Tryout Hoster** to create a tryout.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -3959,13 +3217,10 @@ client.on(
                                 interaction.user.id
                         );
 
-                    if (
-                        existing
-                    ) {
+                    if (existing) {
                         return interaction.reply({
                             content:
                                 '❌ You already have an active tryout lobby.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4037,7 +3292,6 @@ client.on(
                     return interaction.reply({
                         content:
                             '✅ Your tryout lobby has been created.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -4048,8 +3302,7 @@ client.on(
                 ================================================= */
 
                 if (
-                    subcommand ===
-                    'close'
+                    subcommand === 'close'
                 ) {
                     if (
                         !isTryoutHoster(
@@ -4059,7 +3312,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ You must be a **Tryout Hoster** to close tryouts.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4074,13 +3326,10 @@ client.on(
                                 interaction.user.id
                         );
 
-                    if (
-                        !found
-                    ) {
+                    if (!found) {
                         return interaction.reply({
                             content:
                                 '❌ You do not have an active tryout lobby.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4094,8 +3343,7 @@ client.on(
                     const [
                         messageId,
                         lobby
-                    ] =
-                        found;
+                    ] = found;
 
                     tryouts.delete(
                         messageId
@@ -4118,39 +3366,44 @@ client.on(
                             )
                             : null;
 
-                    if (
-                        message
-                    ) {
+                    if (message) {
+                        const closedEmbed =
+                            new EmbedBuilder()
+                                .setColor(
+                                    GOLD
+                                )
+                                .setAuthor({
+                                    name:
+                                        '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍'
+                                })
+                                .setTitle(
+                                    'ᴛʀʏᴏᴜᴛ ʜᴜʙ'
+                                )
+                                .setDescription(
+                                    '✦ **L O B B Y** ✦\n\n' +
+                                    '🔒 **CLOSED**\n\n' +
+                                    `Host: <@${lobby.hostId}>\n` +
+                                    `Players: **${lobby.players.length}/${MAX_PLAYERS}**`
+                                )
+                                .setFooter({
+                                    text:
+                                        '✦ A U R E O N • E U ✦'
+                                });
+
+                        const banner =
+                            getSafeBannerUrl();
+
+                        if (banner) {
+                            closedEmbed.setImage(
+                                banner
+                            );
+                        }
+
                         await message.edit({
                             embeds: [
-                                new EmbedBuilder()
-                                    .setColor(
-                                        GOLD
-                                    )
-                                    .setAuthor({
-                                        name:
-                                            '𝐀 𝐔 𝐑 𝐄 𝐎 𝐍'
-                                    })
-                                    .setTitle(
-                                        'ᴛʀʏᴏᴜᴛ ʜᴜʙ'
-                                    )
-                                    .setDescription(
-                                        '✦ **L O B B Y** ✦\n\n' +
-                                        '🔒 **CLOSED**\n\n' +
-                                        `Host: <@${lobby.hostId}>\n` +
-                                        `Players: **${lobby.players.length}/${MAX_PLAYERS}**`
-                                    )
-                                    .setFooter({
-                                        text:
-                                            '✦ A U R E O N • E U ✦'
-                                    })
-                                    .setImage(
-                                        BANNER_URL
-                                    )
+                                closedEmbed
                             ],
-
-                            components:
-                                []
+                            components: []
                         }).catch(
                             () => {}
                         );
@@ -4167,8 +3420,7 @@ client.on(
                 ================================================= */
 
                 if (
-                    subcommand ===
-                    'results'
+                    subcommand === 'results'
                 ) {
                     if (
                         !isTryoutHoster(
@@ -4178,7 +3430,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ You must be a **Tryout Hoster** to create results.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4192,12 +3443,8 @@ client.on(
                             .setPlaceholder(
                                 'Select a player'
                             )
-                            .setMinValues(
-                                1
-                            )
-                            .setMaxValues(
-                                1
-                            );
+                            .setMinValues(1)
+                            .setMaxValues(1);
 
                     return interaction.reply({
                         content:
@@ -4250,13 +3497,10 @@ client.on(
                             user.id
                         );
 
-                    if (
-                        !profile
-                    ) {
+                    if (!profile) {
                         return interaction.reply({
                             content:
                                 `❌ <@${user.id}> does not have a completed AUREON tryout result yet.`,
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4285,7 +3529,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ You must be a **Tryout Hoster** to announce a tryout.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4304,8 +3547,7 @@ client.on(
                         );
 
                     const duration =
-                        unit ===
-                        'minutes'
+                        unit === 'minutes'
                             ? amount *
                             60 *
                             1000
@@ -4358,7 +3600,6 @@ client.on(
                     return interaction.reply({
                         content:
                             '❌ You must be a **Tryout Hoster**.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -4369,21 +3610,16 @@ client.on(
 
                 const player =
                     await interaction.guild.members
-                        .fetch(
-                            playerId
-                        )
+                        .fetch(playerId)
                         .catch(
                             () =>
                                 null
                         );
 
-                if (
-                    !player
-                ) {
+                if (!player) {
                     return interaction.reply({
                         content:
                             '❌ Player not found.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -4398,9 +3634,7 @@ client.on(
                     interaction.user.id,
                     {
                         playerId,
-
-                        stats:
-                            null
+                        stats: null
                     }
                 );
 
@@ -4429,22 +3663,15 @@ client.on(
                     )
                 ) {
                     const messageId =
-                        interaction.customId.split(
-                            ':'
-                        )[1];
+                        interaction.customId.split(':')[1];
 
                     const scrim =
-                        getScrim(
-                            messageId
-                        );
+                        getScrim(messageId);
 
-                    if (
-                        !scrim
-                    ) {
+                    if (!scrim) {
                         return interaction.reply({
                             content:
                                 '❌ This scrim is no longer active.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4457,7 +3684,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ Only the scrim host can set the server link.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4478,7 +3704,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ Please use a valid HTTPS server link.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4494,7 +3719,6 @@ client.on(
                     return interaction.reply({
                         content:
                             '✅ Server link saved.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -4513,13 +3737,10 @@ client.on(
                             interaction.user.id
                         );
 
-                    if (
-                        !pending
-                    ) {
+                    if (!pending) {
                         return interaction.reply({
                             content:
                                 '❌ This announcement request expired. Please run the command again.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4534,8 +3755,7 @@ client.on(
                             .getTextInputValue(
                                 'announcement_message'
                             )
-                            ?.trim() ||
-                        '';
+                            ?.trim() || '';
 
                     const announcement = {
                         hostId:
@@ -4558,8 +3778,7 @@ client.on(
 
                         customMessage,
 
-                        ready:
-                            [],
+                        ready: [],
 
                         phase:
                             'initial',
@@ -4588,7 +3807,6 @@ client.on(
                         embeds: [
                             announcementEmbed({
                                 ...announcement,
-
                                 messageId:
                                     'pending'
                             })
@@ -4597,14 +3815,12 @@ client.on(
                         components:
                             announcementButtons({
                                 ...announcement,
-
                                 messageId:
                                     'pending'
                             }),
 
                         allowedMentions: {
-                            parse:
-                                []
+                            parse: []
                         }
                     };
 
@@ -4668,9 +3884,7 @@ client.on(
                     });
 
                     const playerId =
-                        interaction.customId.split(
-                            ':'
-                        )[1];
+                        interaction.customId.split(':')[1];
 
                     const getValue =
                         customId => {
@@ -4690,18 +3904,14 @@ client.on(
                             }
 
                             const value =
-                                Number(
-                                    raw
-                                );
+                                Number(raw);
 
                             if (
                                 !Number.isInteger(
                                     value
                                 ) ||
-                                value <
-                                    0 ||
-                                value >
-                                    100
+                                value < 0 ||
+                                value > 100
                             ) {
                                 return null;
                             }
@@ -4710,32 +3920,23 @@ client.on(
                         };
 
                     const shooting =
-                        getValue(
-                            'shooting'
-                        );
+                        getValue('shooting');
 
                     const passing =
-                        getValue(
-                            'passing'
-                        );
+                        getValue('passing');
 
                     const teamwork =
-                        getValue(
-                            'teamwork'
-                        );
+                        getValue('teamwork');
 
                     const gk =
-                        getValue(
-                            'gk'
-                        );
+                        getValue('gk');
 
                     const thingsToFix =
                         interaction.fields
                             .getTextInputValue(
                                 'thingsToFix'
                             )
-                            ?.trim() ||
-                        '';
+                            ?.trim() || '';
 
                     if (
                         [
@@ -4745,8 +3946,7 @@ client.on(
                             gk
                         ].some(
                             value =>
-                                value ===
-                                null
+                                value === null
                         )
                     ) {
                         return interaction.editReply({
@@ -4765,20 +3965,12 @@ client.on(
 
                     const stats = {
                         shooting,
-
                         passing,
-
                         teamwork,
-
                         gk,
-
                         overall,
-
                         rank:
-                            getRank(
-                                overall
-                            ),
-
+                            getRank(overall),
                         thingsToFix
                     };
 
@@ -4786,24 +3978,19 @@ client.on(
                         interaction.user.id,
                         {
                             playerId,
-
                             stats
                         }
                     );
 
                     const player =
                         await interaction.guild.members
-                            .fetch(
-                                playerId
-                            )
+                            .fetch(playerId)
                             .catch(
                                 () =>
                                     null
                             );
 
-                    if (
-                        !player
-                    ) {
+                    if (!player) {
                         return interaction.editReply({
                             content:
                                 '❌ Player not found.'
@@ -4849,7 +4036,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ Please use a valid HTTPS server link.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4866,13 +4052,10 @@ client.on(
                                     interaction.channelId
                         );
 
-                    if (
-                        !found
-                    ) {
+                    if (!found) {
                         return interaction.reply({
                             content:
                                 '❌ Your tryout lobby could not be found.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4881,25 +4064,20 @@ client.on(
                     const [
                         messageId,
                         lobby
-                    ] =
-                        found;
+                    ] = found;
 
                     lobby.serverLink =
                         link;
 
                     const message =
                         await interaction.channel.messages
-                            .fetch(
-                                messageId
-                            )
+                            .fetch(messageId)
                             .catch(
                                 () =>
                                     null
                             );
 
-                    if (
-                        message
-                    ) {
+                    if (message) {
                         await message.edit({
                             embeds: [
                                 tryoutEmbed(
@@ -4917,7 +4095,6 @@ client.on(
                     return interaction.reply({
                         content:
                             '✅ Server link saved. It will only appear publicly at **10/10**.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -4942,22 +4119,17 @@ client.on(
                         'scrim_type:elo'
                 ) {
                     const selectedType =
-                        interaction.customId.split(
-                            ':'
-                        )[1];
+                        interaction.customId.split(':')[1];
 
                     const scrim =
                         getScrim(
                             interaction.message.id
                         );
 
-                    if (
-                        !scrim
-                    ) {
+                    if (!scrim) {
                         return interaction.reply({
                             content:
                                 '❌ This scrim is no longer active.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4970,7 +4142,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ Only the scrim host can choose the scrim type.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -4983,21 +4154,25 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ The scrim type has already been selected.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
                     }
 
+                    /*
+                     * Friendly does not require MAIN_TEAM_ROLE_ID.
+                     * ELO only checks configuration here.
+                     * Actual ELO player permission is checked
+                     * when selecting a position.
+                     */
+
                     if (
-                        selectedType ===
-                            'elo' &&
+                        selectedType === 'elo' &&
                         !MAIN_TEAM_ROLE_ID
                     ) {
                         return interaction.reply({
                             content:
                                 '❌ ELO scrims are not configured yet. Add **MAIN_TEAM_ROLE_ID** in your .env.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5028,9 +4203,7 @@ client.on(
                                     scrim
                                 )
                         });
-                    } catch (
-                        error
-                    ) {
+                    } catch (error) {
                         scrim.type =
                             oldType;
 
@@ -5045,7 +4218,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ Could not update the scrim GUI. Please try again.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5057,11 +4229,9 @@ client.on(
 
                     return interaction.reply({
                         content:
-                            selectedType ===
-                                'elo'
+                            selectedType === 'elo'
                                 ? '🔴 **ELO SCRIM** opened. Main Team players can choose a position.'
                                 : '🟢 **FRIENDLY SCRIM** opened. Everyone can choose a position.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -5081,22 +4251,17 @@ client.on(
                         position,
                         messageId
                     ] =
-                        interaction.customId.split(
-                            ':'
-                        );
+                        interaction.customId.split(':');
 
                     const scrim =
                         getScrim(
                             messageId
                         );
 
-                    if (
-                        !scrim
-                    ) {
+                    if (!scrim) {
                         return interaction.reply({
                             content:
                                 '❌ This scrim is no longer active.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5109,7 +4274,19 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ This scrim is no longer accepting players.',
+                            flags:
+                                MessageFlags.Ephemeral
+                        });
+                    }
 
+                    if (
+                        !SCRIM_POSITIONS.includes(
+                            position
+                        )
+                    ) {
+                        return interaction.reply({
+                            content:
+                                '❌ Invalid position.',
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5125,29 +4302,22 @@ client.on(
                                     null
                             );
 
-                    if (
-                        !member
-                    ) {
+                    if (!member) {
                         return interaction.reply({
                             content:
                                 '❌ Could not find your server member data.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
                     }
 
                     if (
-                        scrim.type ===
-                            'elo' &&
-                        !isMainTeam(
-                            member
-                        )
+                        scrim.type === 'elo' &&
+                        !isMainTeam(member)
                     ) {
                         return interaction.reply({
                             content:
                                 '🔴 **ELO SCRIM:** You need the **Main Team** role to join.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5168,9 +4338,7 @@ client.on(
                         interaction.user
                             .username;
 
-                    if (
-                        existing
-                    ) {
+                    if (existing) {
                         existing.position =
                             position;
 
@@ -5242,35 +4410,26 @@ client.on(
                     )
                 ) {
                     const messageId =
-                        interaction.customId.split(
-                            ':'
-                        )[1];
+                        interaction.customId.split(':')[1];
 
                     const scrim =
-                        getScrim(
-                            messageId
-                        );
+                        getScrim(messageId);
 
-                    if (
-                        !scrim
-                    ) {
+                    if (!scrim) {
                         return interaction.reply({
                             content:
                                 '❌ This scrim is no longer active.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
                     }
 
                     if (
-                        scrim.phase !==
-                        'queue'
+                        scrim.phase !== 'queue'
                     ) {
                         return interaction.reply({
                             content:
                                 '❌ You cannot leave after the random pick has started.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5283,14 +4442,10 @@ client.on(
                                 interaction.user.id
                         );
 
-                    if (
-                        index ===
-                        -1
-                    ) {
+                    if (index === -1) {
                         return interaction.reply({
                             content:
                                 '⚠️ You are not currently in this scrim.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5326,7 +4481,6 @@ client.on(
                     return interaction.reply({
                         content:
                             '↩️ You left the scrim queue.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -5342,22 +4496,15 @@ client.on(
                     )
                 ) {
                     const messageId =
-                        interaction.customId.split(
-                            ':'
-                        )[1];
+                        interaction.customId.split(':')[1];
 
                     const scrim =
-                        getScrim(
-                            messageId
-                        );
+                        getScrim(messageId);
 
-                    if (
-                        !scrim
-                    ) {
+                    if (!scrim) {
                         return interaction.reply({
                             content:
                                 '❌ This scrim is no longer active.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5370,7 +4517,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ Only the scrim host can set the server link.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5428,22 +4574,15 @@ client.on(
                     )
                 ) {
                     const messageId =
-                        interaction.customId.split(
-                            ':'
-                        )[1];
+                        interaction.customId.split(':')[1];
 
                     const scrim =
-                        getScrim(
-                            messageId
-                        );
+                        getScrim(messageId);
 
-                    if (
-                        !scrim
-                    ) {
+                    if (!scrim) {
                         return interaction.reply({
                             content:
                                 '❌ This scrim is already closed.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5456,7 +4595,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ Only the scrim host can close this scrim.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5464,8 +4602,7 @@ client.on(
 
                     /*
                      * Delete from Map FIRST.
-                     * This lets the host create another scrim
-                     * immediately after closing this one.
+                     * Host can immediately create another scrim.
                      */
                     scrims.delete(
                         scrim.messageId
@@ -5480,7 +4617,6 @@ client.on(
                     return interaction.reply({
                         content:
                             '❌ Scrim closed.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -5503,13 +4639,10 @@ client.on(
                                 interaction.message.id
                         );
 
-                    if (
-                        !lobby
-                    ) {
+                    if (!lobby) {
                         return interaction.reply({
                             content:
                                 '❌ This tryout is no longer active.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5547,15 +4680,11 @@ client.on(
 
                     await interaction.message.edit({
                         embeds: [
-                            tryoutEmbed(
-                                lobby
-                            )
+                            tryoutEmbed(lobby)
                         ],
 
                         components:
-                            tryoutButtons(
-                                lobby
-                            )
+                            tryoutButtons(lobby)
                     });
 
                     updatePresence();
@@ -5583,13 +4712,10 @@ client.on(
                                 interaction.message.id
                         );
 
-                    if (
-                        !lobby
-                    ) {
+                    if (!lobby) {
                         return interaction.reply({
                             content:
                                 '❌ This tryout is no longer active.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5615,10 +4741,7 @@ client.on(
                             interaction.user.id
                         );
 
-                    if (
-                        index ===
-                        -1
-                    ) {
+                    if (index === -1) {
                         return interaction.editReply({
                             content:
                                 '⚠️ You are not in this tryout.'
@@ -5632,15 +4755,11 @@ client.on(
 
                     await interaction.message.edit({
                         embeds: [
-                            tryoutEmbed(
-                                lobby
-                            )
+                            tryoutEmbed(lobby)
                         ],
 
                         components:
-                            tryoutButtons(
-                                lobby
-                            )
+                            tryoutButtons(lobby)
                     });
 
                     updatePresence();
@@ -5668,13 +4787,10 @@ client.on(
                                 interaction.message.id
                         );
 
-                    if (
-                        !lobby
-                    ) {
+                    if (!lobby) {
                         return interaction.reply({
                             content:
                                 '❌ This tryout is no longer active.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5687,7 +4803,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ Only the host can set the server link.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5752,13 +4867,10 @@ client.on(
                                 interaction.message.id
                         );
 
-                    if (
-                        !lobby
-                    ) {
+                    if (!lobby) {
                         return interaction.reply({
                             content:
                                 '❌ This tryout is already closed.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5771,7 +4883,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ Only the host can close this tryout.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5792,7 +4903,6 @@ client.on(
                     return interaction.reply({
                         content:
                             '❌ Tryout closed.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -5808,9 +4918,7 @@ client.on(
                     )
                 ) {
                     const messageId =
-                        interaction.customId.split(
-                            ':'
-                        )[1];
+                        interaction.customId.split(':')[1];
 
                     const a =
                         announcements.get(
@@ -5824,7 +4932,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ This announcement is no longer active.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5838,7 +4945,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '⚠️ You are already **READY**.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5851,7 +4957,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ The ready list is already full.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5861,14 +4966,11 @@ client.on(
                         interaction.user.id
                     );
 
-                    await updateAnnouncement(
-                        a
-                    );
+                    await updateAnnouncement(a);
 
                     await interaction.reply({
                         content:
                             '⚡ You are marked **READY**.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -5900,9 +5002,7 @@ client.on(
                     )
                 ) {
                     const messageId =
-                        interaction.customId.split(
-                            ':'
-                        )[1];
+                        interaction.customId.split(':')[1];
 
                     const a =
                         announcements.get(
@@ -5916,7 +5016,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ This announcement is no longer active.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5927,14 +5026,10 @@ client.on(
                             interaction.user.id
                         );
 
-                    if (
-                        index ===
-                        -1
-                    ) {
+                    if (index === -1) {
                         return interaction.reply({
                             content:
                                 '⚠️ You are not currently READY.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5945,14 +5040,11 @@ client.on(
                         1
                     );
 
-                    await updateAnnouncement(
-                        a
-                    );
+                    await updateAnnouncement(a);
 
                     return interaction.reply({
                         content:
                             '↩️ You are no longer marked **READY**.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -5968,9 +5060,7 @@ client.on(
                     )
                 ) {
                     const messageId =
-                        interaction.customId.split(
-                            ':'
-                        )[1];
+                        interaction.customId.split(':')[1];
 
                     const a =
                         announcements.get(
@@ -5984,7 +5074,6 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ This announcement is no longer active.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -5997,42 +5086,34 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ Only the host can RE-PING.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
                     }
 
-                    if (
-                        a.repingUsed
-                    ) {
+                    if (a.repingUsed) {
                         return interaction.reply({
                             content:
                                 '⚠️ RE-PING has already been used.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
                     }
 
-                    a.repingUsed =
-                        true;
+                    a.repingUsed = true;
 
                     await pingTryoutRole(
                         a,
                         true
                     );
 
-                    await updateAnnouncement(
-                        a
-                    );
+                    await updateAnnouncement(a);
 
                     return interaction.reply({
                         content:
                             '✅ **RE-PING sent in the public channel.**\n\n' +
                             `⚡ Ready: **${a.ready.length}/${MAX_PLAYERS}**\n\n` +
                             'When the timer reaches 0, the lobby receives a **2-minute extension**.',
-
                         flags:
                             MessageFlags.Ephemeral
                     });
@@ -6055,16 +5136,13 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ You must be a **Tryout Hoster**.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
                     }
 
                     const playerId =
-                        interaction.customId.split(
-                            ':'
-                        )[1];
+                        interaction.customId.split(':')[1];
 
                     const draft =
                         drafts.get(
@@ -6099,29 +5177,23 @@ client.on(
                         return interaction.reply({
                             content:
                                 '❌ You must be a **Tryout Hoster** to finish results.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
                     }
 
                     const playerId =
-                        interaction.customId.split(
-                            ':'
-                        )[1];
+                        interaction.customId.split(':')[1];
 
                     const draft =
                         drafts.get(
                             interaction.user.id
                         );
 
-                    if (
-                        !draft?.stats
-                    ) {
+                    if (!draft?.stats) {
                         return interaction.reply({
                             content:
                                 '❌ No result draft was found. Enter the stats again.',
-
                             flags:
                                 MessageFlags.Ephemeral
                         });
@@ -6235,17 +5307,13 @@ client.on(
 
                     const player =
                         await interaction.guild.members
-                            .fetch(
-                                playerId
-                            )
+                            .fetch(playerId)
                             .catch(
                                 () =>
                                     null
                             );
 
-                    if (
-                        player
-                    ) {
+                    if (player) {
                         await interaction.channel.send({
                             content:
                                 `<@${playerId}>`,
@@ -6284,18 +5352,13 @@ client.on(
                             `◇ BEST OVR: **${updatedData.bestOVR}**` +
                             roleText,
 
-                        embeds:
-                            [],
+                        embeds: [],
 
-                        components:
-                            []
+                        components: []
                     });
                 }
             }
-        }
-         catch (
-            error
-        ) {
+        } catch (error) {
             console.error(
                 '❌ Interaction error:',
                 error
@@ -6338,16 +5401,12 @@ client.on(
 client.on(
     'messageDelete',
     message => {
-        if (
-            !message?.id
-        ) {
+        if (!message?.id) {
             return;
         }
 
         if (
-            tryouts.has(
-                message.id
-            )
+            tryouts.has(message.id)
         ) {
             tryouts.delete(
                 message.id
@@ -6367,9 +5426,7 @@ client.on(
         }
 
         if (
-            scrims.has(
-                message.id
-            )
+            scrims.has(message.id)
         ) {
             scrims.delete(
                 message.id
@@ -6384,7 +5441,9 @@ client.on(
 
 normalizeDatabase();
 
-console.log('🚀 Starting AUREON bot...');
+console.log(
+    '🚀 Starting AUREON bot...'
+);
 
 console.log(
     `⚡ Hoster role ID: ${
@@ -6418,25 +5477,58 @@ console.log(
     }`
 );
 
+console.log(
+    `🔴 ELO Scrim Ping: ${
+        ELO_SCRIM_PING_ROLE_ID
+            ? 'VALID'
+            : 'MISSING / INVALID'
+    }`
+);
+
+console.log(
+    `🖼️ Banner URL: ${
+        BANNER_URL
+            ? 'VALID'
+            : 'MISSING'
+    }`
+);
+
 /* =========================================================
    DISCORD LOGIN
 ========================================================= */
 
-const LOGIN_TOKEN = String(
-    process.env.TOKEN ||
-    process.env.DISCORD_TOKEN ||
-    TOKEN ||
-    ''
-)
-    .trim()
-    .replace(/^["']|["']$/g, '')
-    .replace(/^Bot\s+/i, '');
+const LOGIN_TOKEN =
+    String(
+        process.env.TOKEN ||
+        process.env.DISCORD_TOKEN ||
+        TOKEN ||
+        ''
+    )
+        .trim()
+        .replace(
+            /^["']|["']$/g,
+            ''
+        )
+        .replace(
+            /^Bot\s+/i,
+            ''
+        );
+
+/* =========================================================
+   TOKEN CHECK
+========================================================= */
 
 if (!LOGIN_TOKEN) {
     console.error('');
-    console.error('======================================');
-    console.error('❌ DISCORD TOKEN IS MISSING');
-    console.error('======================================');
+    console.error(
+        '======================================'
+    );
+    console.error(
+        '❌ DISCORD TOKEN IS MISSING'
+    );
+    console.error(
+        '======================================'
+    );
     console.error(
         'Railway Environment Variables must contain TOKEN.'
     );
@@ -6449,31 +5541,54 @@ if (!LOGIN_TOKEN) {
 
 (async () => {
     try {
-        console.log('🔐 Attempting Discord login...');
+        console.log(
+            '🔐 Attempting Discord login...'
+        );
 
-        await client.login(LOGIN_TOKEN);
+        await client.login(
+            LOGIN_TOKEN
+        );
 
         console.log(
             '✅ Discord login successful.'
         );
-
     } catch (error) {
         console.error('');
-        console.error('======================================');
-        console.error('❌ DISCORD LOGIN FAILED');
-        console.error('======================================');
         console.error(
-            `Error code: ${error?.code ?? 'UNKNOWN'}`
+            '======================================'
         );
         console.error(
-            `Error name: ${error?.name ?? 'UNKNOWN'}`
+            '❌ DISCORD LOGIN FAILED'
         );
         console.error(
-            `Error message: ${error?.message ?? 'UNKNOWN'}`
+            '======================================'
         );
+
+        console.error(
+            `Error code: ${
+                error?.code ??
+                'UNKNOWN'
+            }`
+        );
+
+        console.error(
+            `Error name: ${
+                error?.name ??
+                'UNKNOWN'
+            }`
+        );
+
+        console.error(
+            `Error message: ${
+                error?.message ??
+                'UNKNOWN'
+            }`
+        );
+
         console.error(
             'The token itself was NOT printed.'
         );
+
         console.error('');
 
         process.exit(1);
